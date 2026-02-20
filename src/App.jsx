@@ -191,25 +191,28 @@ export default function App() {
   const handleGenerateReport = () => { setIsGenerating(true); setTimeout(() => { setGeneratedReport(generateWeeklyReport(kpi, periods)); setIsGenerating(false); }, 1500); };
   const copyToClipboard = () => { if (generatedReport) { navigator.clipboard.writeText(generatedReport.text); alert("Testo copiato e pronto per la mail!"); } };
 
-  // --- API ZOHO SYNC FUNCTION ---
+  // --- API ZOHO SYNC FUNCTION (TRAMITE MAKE.COM) ---
   const syncZohoAPI = async () => {
     setLoading(true);
-    addLog('Chiamata API Zoho in corso...', 'info');
+    addLog('Invio comando di sincronizzazione a Make.com...', 'info');
     try {
-      const res = await fetch('/.netlify/functions/syncZoho');
-      const text = await res.text();
-      let responseData;
-      try { responseData = JSON.parse(text); } catch(e) { throw new Error("La funzione API non è raggiungibile o non è stata configurata correttamente."); }
+      // Chiamiamo il webhook di Make.com
+      const res = await fetch('https://hook.eu1.make.com/46bhvr8e104vt5tfnweaomjkcg2p6bk6');
       
-      if (!res.ok || responseData.error) throw new Error(responseData.error || "Errore sconosciuto dal server");
+      if (!res.ok) throw new Error("Make.com non ha risposto correttamente.");
       
-      addLog('Sincronizzazione API riuscita!', 'success');
-      alert("✅ Sincronizzazione Zoho completata con successo!");
-      await fetchAll(); 
+      addLog('Comando ricevuto da Make!', 'success');
+      alert("✅ Sincronizzazione avviata! Make.com sta elaborando i ticket in background. I dati si aggiorneranno tra pochi secondi.");
+      
+      // Aspettiamo 3 secondi per dare il tempo a Make di completare l'operazione, poi ricarichiamo
+      setTimeout(() => {
+        fetchAll();
+        setLoading(false);
+      }, 3000);
+
     } catch (err) {
       addLog(err.message, 'error');
-      alert("Errore API: " + err.message + "\nAssicurati di aver creato la cartella netlify/functions/ e di aver fatto il deploy su GitHub.");
-    } finally {
+      alert("Errore API: " + err.message);
       setLoading(false);
     }
   };
@@ -315,12 +318,10 @@ export default function App() {
                 <div className="flex justify-between items-center bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
                   <div>
                     <h2 className="text-2xl font-bold text-slate-900 capitalize">Ticket {view}</h2>
-                    <p className="text-slate-500 text-sm mt-1">Connesso a Zoho Desk API</p>
+                    <p className="text-slate-500 text-sm mt-1">Connesso a Zoho Desk API tramite Make.com</p>
                   </div>
                   <div className="flex gap-3">
-                    {/* Vecchio tasto Importa (nascosto o secondario) */}
                     <label className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-lg cursor-pointer text-sm font-bold transition-colors"><Upload size={16} /> Caricamento Manuale<input type="file" className="hidden" onChange={(e) => handleFile(e, view)} /></label>
-                    {/* NUOVO TASTO API MAGICO */}
                     <button onClick={syncZohoAPI} className="flex items-center gap-2 px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white shadow-md rounded-lg cursor-pointer text-sm font-bold transition-all hover:scale-105 active:scale-95">
                       <RefreshCw size={16} className={loading ? "animate-spin" : ""} /> Sincronizza Dati di Oggi
                     </button>
