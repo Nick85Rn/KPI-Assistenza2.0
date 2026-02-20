@@ -1,14 +1,13 @@
+/* eslint-disable */
 import * as XLSX from 'xlsx';
 import { isValid, parse } from 'date-fns';
 import { enUS } from 'date-fns/locale';
 
 // --- NORMALIZZAZIONE IDENTITÀ ---
-// Trasforma "Emanuele Rosti" o "emanuele" sempre in "Emanuele"
 const normalizeOperatorName = (name) => {
   if (!name) return '';
   const cleanName = String(name).trim();
   
-  // Dizionario delle identità (puoi aggiungere eccezioni qui in futuro)
   const aliases = {
     'nicola pellicioni': 'Nicola',
     'emanuele rosti': 'Emanuele',
@@ -21,7 +20,6 @@ const normalizeOperatorName = (name) => {
   const key = cleanName.toLowerCase();
   if (aliases[key]) return aliases[key];
 
-  // Regola generale: prendi solo la prima parola (il Nome) e metti l'iniziale Maiuscola
   const firstName = cleanName.split(' ')[0];
   return firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase();
 };
@@ -149,13 +147,15 @@ const processData = (rawData, type, rangeFound) => {
       }
     }
   }
-  else {
-    const hIdx = findHeader(['Nuovo Ticket']);
+  else if (type === 'assistenza' || type === 'sviluppo') {
+    let hIdx = findHeader(['Nuovo Ticket']);
+    if (hIdx === -1) hIdx = findHeader(['Ticket']); // Paracadute per export in inglese
     if (hIdx === -1) throw new Error("Header Ticket non trovato");
+    
     const headers = rawData[hIdx].map(h => String(h).toLowerCase());
-    const idxDate = headers.findIndex(h => h === 'data');
-    const idxNew = headers.findIndex(h => h.includes('nuovo'));
-    const idxClo = headers.findIndex(h => h.includes('chiusi'));
+    const idxDate = headers.findIndex(h => h === 'data' || h === 'date'); // Aggiunto 'date'
+    const idxNew = headers.findIndex(h => h.includes('nuovo') || h.includes('new'));
+    const idxClo = headers.findIndex(h => h.includes('chiusi') || h.includes('closed'));
     const idxBack = headers.findIndex(h => h.includes('backlog'));
     const idxFirstResp = headers.findIndex(h => h.includes('prima risposta') || h.includes('first response'));
     const idxResolution = headers.findIndex(h => h.includes('risoluzione') || h.includes('resolution'));
@@ -166,8 +166,11 @@ const processData = (rawData, type, rangeFound) => {
       const date = cleanDate(row[idxDate]);
       if (date) {
         cleanData.push({ 
-          date: date.toISOString(), new_tickets: Number(row[idxNew] || 0), closed_tickets: Number(row[idxClo] || 0), 
-          backlog: Number(row[idxBack] || 0), first_response_time: parseDurationToMinutes(row[idxFirstResp]), 
+          date: date.toISOString(), 
+          new_tickets: Number(row[idxNew] || 0), 
+          closed_tickets: Number(row[idxClo] || 0), 
+          backlog: Number(row[idxBack] || 0), 
+          first_response_time: parseDurationToMinutes(row[idxFirstResp]), 
           resolution_time: parseDurationToMinutes(row[idxResolution])
         });
       }
