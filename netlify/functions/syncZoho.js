@@ -3,9 +3,9 @@ import { createClient } from '@supabase/supabase-js';
 export const handler = async (event, context) => {
   try {
     // --- CHIAVI ZOHO ---
-    const ZOHO_CLIENT_ID = '1000.A62V1KP5LEPIX0CRFZ7YF3UE7JMMVR';
-    const ZOHO_CLIENT_SECRET = 'ebc5d7613aede1e5108486b29d66d9cfa29d29e10e';
-    const ZOHO_REFRESH_TOKEN = '1000.8f3e969822f623cd9c5d08dbdde895cf.026a8f50452a04252180d040d890310b';
+    const ZOHO_CLIENT_ID = '1000.D367IR3LJFDA98M5F0LJLMXCNO3X1X';
+    const ZOHO_CLIENT_SECRET = '9e92aaaafe4f5d0a1a7d71e44c2c280eac32e4edf6';
+    const ZOHO_REFRESH_TOKEN = '1000.3a825fefae357ff100d97f88ade21da7.9a6c344db3c3459c391ca1b6fab9d679';
     
     // ⚠️ INSERISCI QUI IL TUO ORG ID (Esempio: '674512390')
     const ZOHO_ORG_ID = '20103492490'; 
