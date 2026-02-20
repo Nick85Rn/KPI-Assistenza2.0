@@ -207,13 +207,21 @@ export default function App() {
     return Object.entries(stats).map(([name, val]) => ({ name, chat: val.chat, form: val.form, score: val.chat + (val.form * 10) })).sort((a,b) => b.score - a.score);
   }, [data, periods]);
 
+  // --- NUOVI TREND PER I GRAFICI (Solo Volumi) ---
   const astTrend = useMemo(() => {
-    return data.ast.filter(x => safeInRange(x.date, periods.curr.start, periods.curr.end)).map(x => ({ date: format(parseISO(x.date), 'EEE', {locale:it}), closed: x.closed_tickets, time: x.first_response_time }));
+    return data.ast.filter(x => safeInRange(x.date, periods.curr.start, periods.curr.end)).map(x => ({ 
+      date: format(parseISO(x.date), 'EEE', {locale:it}), 
+      creati: x.new_tickets, 
+      risolti: x.closed_tickets 
+    }));
   }, [data, periods]);
 
-  // NUOVO TREND SVILUPPO
   const devTrend = useMemo(() => {
-    return data.dev.filter(x => safeInRange(x.date, periods.curr.start, periods.curr.end)).map(x => ({ date: format(parseISO(x.date), 'EEE', {locale:it}), closed: x.closed_tickets, time: x.resolution_time }));
+    return data.dev.filter(x => safeInRange(x.date, periods.curr.start, periods.curr.end)).map(x => ({ 
+      date: format(parseISO(x.date), 'EEE', {locale:it}), 
+      creati: x.new_tickets, 
+      risolti: x.closed_tickets 
+    }));
   }, [data, periods]);
 
   const handleGenerateReport = () => { setIsGenerating(true); setTimeout(() => { setGeneratedReport(generateWeeklyReport(kpi, periods)); setIsGenerating(false); }, 1500); };
@@ -228,7 +236,7 @@ export default function App() {
       if (!res.ok) throw new Error("Make.com non ha risposto correttamente.");
       
       addLog('Comando ricevuto da Make!', 'success');
-      setIsSyncModalOpen(true); // Apre la modale al posto dell'alert
+      setIsSyncModalOpen(true);
       
       setTimeout(() => {
         fetchAll();
@@ -337,7 +345,7 @@ export default function App() {
               </>
             )}
 
-            {/* VISTE TICKET: ORA HANNO IL BOTTONE API VERDE! */}
+            {/* VISTE TICKET: ORA HANNO GRAFICI A DOPPIA BARRA (Creati vs Risolti) */}
             {(view === 'assistenza' || view === 'sviluppo') && (
               <>
                 <div className="flex justify-between items-center bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
@@ -355,12 +363,32 @@ export default function App() {
                 
                 {/* GRAFICO ASSISTENZA */}
                 {view === 'assistenza' && (
-                  <ChartContainer title="Tempo Risposta vs Volumi (Assistenza)" isEmpty={astTrend.length === 0}><ComposedChart data={astTrend}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="date" tick={{textTransform: 'capitalize'}} /><YAxis yAxisId="left" /><YAxis yAxisId="right" orientation="right" unit="m" /><Tooltip /><Bar yAxisId="left" dataKey="closed" fill="#6366f1" radius={[4,4,0,0]} name="Ticket Chiusi" barSize={40}/><Line yAxisId="right" type="monotone" dataKey="time" stroke="#f59e0b" strokeWidth={3} name="Tempo Risposta (min)" /></ComposedChart></ChartContainer>
+                  <ChartContainer title="Volumi: Ticket Creati vs Risolti (Assistenza)" isEmpty={astTrend.length === 0}>
+                    <BarChart data={astTrend} margin={{ top: 20, right: 0, left: -20, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                      <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fontSize:12, fill:'#64748b', textTransform:'capitalize'}} />
+                      <YAxis axisLine={false} tickLine={false} tick={{fontSize:12, fill:'#64748b'}} />
+                      <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius:'12px', border:'none', boxShadow:'0 10px 15px -3px rgba(0,0,0,0.1)'}} />
+                      <Legend verticalAlign="top" height={36}/>
+                      <Bar dataKey="creati" fill="#94a3b8" radius={[4,4,0,0]} name="Ticket Creati" barSize={30}/>
+                      <Bar dataKey="risolti" fill="#6366f1" radius={[4,4,0,0]} name="Ticket Risolti" barSize={30}/>
+                    </BarChart>
+                  </ChartContainer>
                 )}
 
                 {/* GRAFICO SVILUPPO */}
                 {view === 'sviluppo' && (
-                  <ChartContainer title="Tempo Risoluzione vs Volumi (Sviluppo)" isEmpty={devTrend.length === 0}><ComposedChart data={devTrend}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="date" tick={{textTransform: 'capitalize'}} /><YAxis yAxisId="left" /><YAxis yAxisId="right" orientation="right" unit="m" /><Tooltip /><Bar yAxisId="left" dataKey="closed" fill="#10b981" radius={[4,4,0,0]} name="Ticket Chiusi" barSize={40}/><Line yAxisId="right" type="monotone" dataKey="time" stroke="#8b5cf6" strokeWidth={3} name="Tempo Risoluzione (min)" /></ComposedChart></ChartContainer>
+                  <ChartContainer title="Volumi: Bug Segnalati vs Risolti (Sviluppo)" isEmpty={devTrend.length === 0}>
+                    <BarChart data={devTrend} margin={{ top: 20, right: 0, left: -20, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                      <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fontSize:12, fill:'#64748b', textTransform:'capitalize'}} />
+                      <YAxis axisLine={false} tickLine={false} tick={{fontSize:12, fill:'#64748b'}} />
+                      <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius:'12px', border:'none', boxShadow:'0 10px 15px -3px rgba(0,0,0,0.1)'}} />
+                      <Legend verticalAlign="top" height={36}/>
+                      <Bar dataKey="creati" fill="#94a3b8" radius={[4,4,0,0]} name="Bug Segnalati" barSize={30}/>
+                      <Bar dataKey="risolti" fill="#10b981" radius={[4,4,0,0]} name="Bug Risolti" barSize={30}/>
+                    </BarChart>
+                  </ChartContainer>
                 )}
               </>
             )}
@@ -393,7 +421,6 @@ export default function App() {
         </div>
       )}
       
-      {/* INSERIMENTO MODALE SINCRONIZZAZIONE */}
       <SyncModal isOpen={isSyncModalOpen} onClose={() => setIsSyncModalOpen(false)} />
     </div>
   );
