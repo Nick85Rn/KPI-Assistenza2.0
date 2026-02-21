@@ -6,7 +6,7 @@ import {
 import { 
   Database, Users, AlertCircle, Code, LayoutDashboard, 
   ChevronLeft, ChevronRight, TrendingUp, TrendingDown, 
-  RefreshCw, X, FileText, ClipboardCheck, Star, Trophy, Target, Clock, Tag, Bug, Zap, CheckCircle2
+  RefreshCw, X, FileText, ClipboardCheck, Star, Trophy, Target, Clock, Tag, Bug, Zap, CheckCircle2, Copy
 } from 'lucide-react';
 import { 
   format, subWeeks, addWeeks, startOfWeek, endOfWeek, 
@@ -73,6 +73,23 @@ const SectionTitle = ({ icon: Icon, title, colorClass, bgClass }) => (
   </div>
 );
 
+const ChartContainer = ({ title, children, isEmpty, height = 320 }) => (
+  <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm w-full flex flex-col" style={{height: `${height}px`}}>
+    <h3 className="font-bold text-slate-800 mb-6 flex-shrink-0 text-sm uppercase tracking-wide">{title}</h3>
+    <div className="flex-1 w-full relative min-h-0">
+      {isEmpty ? (
+        <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-300">
+          <span className="text-xs font-medium bg-slate-50 px-4 py-2 rounded-lg">Nessun dato nel periodo selezionato</span>
+        </div>
+      ) : (
+        <div style={{ width: '100%', height: '100%' }}>
+          <ResponsiveContainer width="99%" height="100%" minWidth={0}>{children}</ResponsiveContainer>
+        </div>
+      )}
+    </div>
+  </div>
+);
+
 // --- MAIN APP ---
 export default function App() {
   const [view, setView] = useState('dashboard');
@@ -80,6 +97,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [generatedReport, setGeneratedReport] = useState(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => { fetchAll(); }, []);
 
@@ -98,24 +116,22 @@ export default function App() {
   const periods = useMemo(() => {
     const s = startOfWeek(currentDate, { weekStartsOn: 1 });
     const e = endOfWeek(currentDate, { weekStartsOn: 1 });
-    return { curr: { start: s, end: e, label: `Sett. ${getISOWeek(currentDate)}` }, prev: { start: subWeeks(s, 1), end: subWeeks(e, 1) } };
+    const label = `Sett. ${getISOWeek(currentDate)} (${format(s, 'dd MMM', {locale: it})} - ${format(e, 'dd MMM', {locale: it})})`;
+    return { curr: { start: s, end: e, label }, prev: { start: subWeeks(s, 1), end: subWeeks(e, 1) } };
   }, [currentDate]);
 
-  // --- KPI ENGINE ---
+  // --- KPI & INSIGHTS ENGINE ---
   const kpi = useMemo(() => {
     const calc = (start, end) => {
-      // Chat
       const chats = data.chat.filter(x => safeInRange(x.created_time, start, end));
       const respChat = chats.length > 0 ? chats.reduce((a,b) => a + (Number(b.waiting_time_seconds)||0), 0) / chats.length : 0;
       const rated = chats.filter(x => x.rating > 0);
       const avgRating = rated.length > 0 ? rated.reduce((a,b) => a + Number(b.rating), 0) / rated.length : 0;
 
-      // Assistenza
       const astIn = data.ast.filter(x => safeInRange(x.created_time, start, end));
       const astOut = data.ast.filter(x => safeInRange(x.closed_time, start, end));
       const slaAst = astOut.length > 0 ? astOut.reduce((a,x) => a + diffInMinutes(x.closed_time, x.created_time), 0) / astOut.length : 0;
 
-      // Sviluppo
       const devIn = data.dev.filter(x => safeInRange(x.created_time, start, end));
       const devOut = data.dev.filter(x => safeInRange(x.closed_time, start, end));
       const slaDev = devOut.length > 0 ? devOut.reduce((a,x) => a + diffInMinutes(x.closed_time, x.created_time), 0) / devOut.length : 0;
@@ -126,55 +142,75 @@ export default function App() {
     return { curr: calc(periods.curr.start, periods.curr.end), prev: calc(periods.prev.start, periods.prev.end) };
   }, [data, periods]);
 
-  // --- INSIGHTS ENGINE (Leaderboards & Categories) ---
+  const trends = useMemo(() => {
+    return eachDayOfInterval({ start: periods.curr.start, end: periods.curr.end }).map(day => {
+      const dStart = startOfDay(day); const dEnd = endOfDay(day);
+      return {
+        date: format(day, 'EEE', {locale: it}),
+        chatVol: data.chat.filter(x => safeInRange(x.created_time, dStart, dEnd)).length,
+        astIn: data.ast.filter(x => safeInRange(x.created_time, dStart, dEnd)).length,
+        astOut: data.ast.filter(x => safeInRange(x.closed_time, dStart, dEnd)).length,
+        devIn: data.dev.filter(x => safeInRange(x.created_time, dStart, dEnd)).length,
+        devOut: data.dev.filter(x => safeInRange(x.closed_time, dStart, dEnd)).length,
+      };
+    });
+  }, [data, periods.curr]);
+
   const insights = useMemo(() => {
-    // 1. Top Chat Operators
     const chats = data.chat.filter(x => safeInRange(x.created_time, periods.curr.start, periods.curr.end));
     const opsMap = {};
     chats.forEach(c => {
-       const op = c.operator || 'Bot / Non Assegnato';
-       if(!opsMap[op]) opsMap[op] = { name: op, count: 0, ratingSum: 0, ratedCount: 0 };
+       const op = c.operator || 'Non Assegnato';
+       if(!opsMap[op]) opsMap[op] = { name: op, count: 0, ratingSum: 0, ratedCount: 0, waitSum: 0 };
        opsMap[op].count++;
+       opsMap[op].waitSum += (Number(c.waiting_time_seconds)||0);
        if(c.rating > 0) { opsMap[op].ratingSum += c.rating; opsMap[op].ratedCount++; }
     });
-    const topOps = Object.values(opsMap).map(o => ({
-       name: o.name, count: o.count, avgRating: o.ratedCount > 0 ? (o.ratingSum / o.ratedCount).toFixed(1) : '-'
-    })).sort((a,b) => b.count - a.count).slice(0, 4);
+    const allOps = Object.values(opsMap).map(o => ({
+       name: o.name, count: o.count, avgWait: o.count > 0 ? o.waitSum / o.count : 0, avgRating: o.ratedCount > 0 ? (o.ratingSum / o.ratedCount).toFixed(1) : '-'
+    })).sort((a,b) => b.count - a.count);
 
-    // 2. Top Assistenza Categories
     const ast = data.ast.filter(x => safeInRange(x.created_time, periods.curr.start, periods.curr.end));
-    const astCatMap = {};
-    ast.forEach(t => { const c = t.category || 'Generale'; astCatMap[c] = (astCatMap[c]||0) + 1; });
-    const topAstCats = Object.entries(astCatMap).map(([name, count]) => ({name, count})).sort((a,b) => b.count - a.count).slice(0, 4);
+    const astCatMap = {}; ast.forEach(t => { const c = t.category || 'Generale'; astCatMap[c] = (astCatMap[c]||0) + 1; });
+    const allAstCats = Object.entries(astCatMap).map(([name, count]) => ({name, count})).sort((a,b) => b.count - a.count);
 
-    // 3. Top Sviluppo Categories (Bug attivi)
-    const devCatsMap = {};
-    data.dev.filter(x => !x.status?.toLowerCase().includes('chius')).forEach(t => {
-      const c = t.category || 'Generale'; devCatsMap[c] = (devCatsMap[c]||0) + 1;
-    });
-    const topDevCats = Object.entries(devCatsMap).map(([name, count]) => ({name, count})).sort((a,b) => b.count - a.count).slice(0, 4);
+    const devCatsMap = {}; data.dev.filter(x => !x.status?.toLowerCase().includes('chius')).forEach(t => { const c = t.category || 'Generale'; devCatsMap[c] = (devCatsMap[c]||0) + 1; });
+    const allDevCats = Object.entries(devCatsMap).map(([name, count]) => ({name, count})).sort((a,b) => b.count - a.count);
 
-    return { topOps, topAstCats, topDevCats };
+    return { allOps, topOps: allOps.slice(0, 4), allAstCats, topAstCats: allAstCats.slice(0, 4), allDevCats, topDevCats: allDevCats.slice(0, 4) };
   }, [data, periods.curr]);
 
   const handleGenerateReport = () => {
     const c = kpi.curr; const p = kpi.prev;
-    setGeneratedReport(`
-      EXECUTIVE SUMMARY: ${periods.curr.label}
-      -----------------------------------------
-      [CHAT & TEAM]
-      Volumi: ${c.chatVol} chat gestite (Trend: ${c.chatVol >= p.chatVol ? '+' : ''}${c.chatVol - p.chatVol})
-      Soddisfazione: ${c.chatRating > 0 ? c.chatRating.toFixed(1) + '/5.0' : 'N/A'}
-      Tempo attesa medio: ${formatSeconds(c.chatWait)}
+    const reportText = `📊 REPORT DIREZIONALE PIENISSIMO
+🗓️ Periodo: ${periods.curr.label}
+-----------------------------------------
+👤 [REPARTO CHAT & TEAM]
+• Volumi: ${c.chatVol} chat gestite (vs ${p.chatVol} sett. prec.)
+• Tempo attesa medio cliente: ${formatSeconds(c.chatWait)}
+• Qualità percepita: ${c.chatRating > 0 ? c.chatRating.toFixed(1) + ' / 5.0' : 'Nessun voto'}
+🥇 Miglior operatore per volumi: ${insights.topOps.length > 0 ? insights.topOps[0].name : 'N/A'} (${insights.topOps.length > 0 ? insights.topOps[0].count : 0} chat)
 
-      [ASSISTENZA TECNICA]
-      Ticket Creati: ${c.astIn} | Ticket Risolti: ${c.astOut}
-      SLA di Risoluzione: ${formatTime(c.slaAst)}
+🛠️ [ASSISTENZA TECNICA]
+• Nuovi Ticket Entranti: ${c.astIn}
+• Ticket Risolti/Chiusi: ${c.astOut}
+• Tempo medio di risoluzione (SLA): ${formatTime(c.slaAst)}
 
-      [SVILUPPO & BUG]
-      Backlog Attivo: ${c.backlog} bug (Variazione: ${c.backlog >= p.backlog ? '+' : ''}${c.backlog - p.backlog})
-      Bug risolti in settimana: ${c.devOut}
-    `);
+💻 [SVILUPPO & BUG FIXING]
+• Bug risolti questa settimana: ${c.devOut}
+• Backlog Attivo (Debito tecnico): ${c.backlog} bug aperti
+• Categoria più critica: ${insights.topDevCats.length > 0 ? insights.topDevCats[0].name : 'Nessuna'}
+-----------------------------------------
+Generato automaticamente da Pienissimo.bi`;
+
+    setGeneratedReport(reportText);
+    setCopied(false);
+  };
+
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(generatedReport);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   return (
@@ -199,7 +235,7 @@ export default function App() {
       <div className="flex-1 flex flex-col h-full overflow-hidden">
         {/* TOPBAR */}
         <header className="bg-white/80 backdrop-blur-md border-b border-slate-200 px-8 py-4 flex justify-between items-center z-10 sticky top-0">
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 shadow-inner">
+          <div className="flex items-center gap-1 bg-slate-100 p-1.5 rounded-xl border border-slate-200 shadow-inner">
             <button onClick={() => setCurrentDate(subWeeks(currentDate,1))} className="p-1.5 hover:bg-white rounded-lg transition-all"><ChevronLeft size={16}/></button>
             <span className="text-xs font-black px-4 uppercase tracking-widest text-slate-700">{periods.curr.label}</span>
             <button onClick={() => setCurrentDate(addWeeks(currentDate,1))} className="p-1.5 hover:bg-white rounded-lg transition-all"><ChevronRight size={16}/></button>
@@ -215,17 +251,23 @@ export default function App() {
         <main className="flex-1 overflow-auto p-8 pb-32">
           <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
             
+            {/* FINESTRA REPORT GENERATO */}
             {generatedReport && (
-              <div className="bg-slate-900 rounded-2xl p-6 relative shadow-2xl text-white mb-8">
+              <div className="bg-slate-900 rounded-2xl p-6 relative shadow-2xl text-white mb-8 border border-slate-700">
                 <button onClick={() => setGeneratedReport(null)} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={18}/></button>
-                <div className="flex items-center gap-2 mb-4"><ClipboardCheck size={20} className="text-blue-400"/><h3 className="font-bold uppercase text-xs tracking-widest text-blue-400">Appunti per il Management</h3></div>
-                <pre className="text-sm font-mono text-slate-200 whitespace-pre-wrap leading-relaxed">{generatedReport}</pre>
+                <div className="flex justify-between items-center mb-4">
+                  <div className="flex items-center gap-2"><ClipboardCheck size={20} className="text-blue-400"/><h3 className="font-bold uppercase text-xs tracking-widest text-blue-400">Report per la Direzione</h3></div>
+                  <button onClick={copyToClipboard} className="flex items-center gap-2 text-xs font-bold bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg transition-all mr-6">
+                    {copied ? <CheckCircle2 size={14} className="text-emerald-400"/> : <Copy size={14}/>} {copied ? 'Copiato!' : 'Copia Testo'}
+                  </button>
+                </div>
+                <pre className="text-sm font-mono text-slate-200 whitespace-pre-wrap leading-relaxed bg-slate-800/50 p-4 rounded-xl">{generatedReport}</pre>
               </div>
             )}
 
+            {/* VISTA DASHBOARD GLOBALE */}
             {view === 'dashboard' && (
               <div className="space-y-10">
-                {/* REPARTO CHAT (Blue Theme) */}
                 <section>
                   <SectionTitle icon={Users} title="Performance Chat & Team" colorClass="text-blue-600" bgClass="bg-blue-100" />
                   <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
@@ -234,27 +276,22 @@ export default function App() {
                       <KPICard label="Attesa Media" current={kpi.curr.chatWait} previous={kpi.prev.chatWait} type="seconds" invert icon={Clock} colorClass="text-blue-500" />
                       <KPICard label="Soddisfazione" current={kpi.curr.chatRating} previous={kpi.prev.chatRating} type="rating" unit="/ 5" icon={Star} colorClass="text-amber-400" />
                     </div>
-                    {/* LEADERBOARD WIDGET */}
-                    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 flex flex-col">
+                    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 flex flex-col cursor-pointer hover:border-blue-200 transition-all" onClick={() => setView('chat')}>
                       <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2"><Trophy size={14} className="text-amber-500"/> Top Operatori</h3>
                       <div className="flex-1 space-y-3">
                         {insights.topOps.length === 0 ? <p className="text-xs text-slate-400">Nessun dato</p> : 
                           insights.topOps.map((op, i) => (
                             <div key={i} className="flex justify-between items-center pb-2 border-b border-slate-50 last:border-0">
-                              <div>
-                                <span className="text-sm font-bold text-slate-800">{op.name}</span>
-                                <div className="flex items-center gap-1 text-[10px] text-amber-500 font-bold mt-0.5"><Star size={10} className="fill-amber-500"/> {op.avgRating}</div>
-                              </div>
+                              <div><span className="text-sm font-bold text-slate-800">{op.name}</span><div className="flex items-center gap-1 text-[10px] text-amber-500 font-bold mt-0.5"><Star size={10} className="fill-amber-500"/> {op.avgRating}</div></div>
                               <span className="bg-blue-50 text-blue-700 font-black text-xs px-2 py-1 rounded-md">{op.count}</span>
                             </div>
-                          ))
-                        }
+                          ))}
                       </div>
+                      <div className="mt-3 text-center text-[10px] font-bold text-blue-500 uppercase tracking-wider">Vedi tutti &rarr;</div>
                     </div>
                   </div>
                 </section>
 
-                {/* REPARTO ASSISTENZA (Emerald Theme) */}
                 <section>
                   <SectionTitle icon={AlertCircle} title="Supporto Tecnico" colorClass="text-emerald-600" bgClass="bg-emerald-100" />
                   <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
@@ -263,9 +300,8 @@ export default function App() {
                       <KPICard label="Ticket Chiusi" current={kpi.curr.astOut} previous={kpi.prev.astOut} icon={CheckCircle2} colorClass="text-emerald-500" />
                       <KPICard label="SLA Risoluzione" current={kpi.curr.slaAst} previous={kpi.prev.slaAst} type="time" invert icon={Clock} colorClass="text-emerald-500" />
                     </div>
-                    {/* TOP CATEGORIES WIDGET */}
-                    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 flex flex-col">
-                      <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2"><Tag size={14} className="text-emerald-500"/> Categorie Più Frequenti</h3>
+                    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 flex flex-col cursor-pointer hover:border-emerald-200 transition-all" onClick={() => setView('assistenza')}>
+                      <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2"><Tag size={14} className="text-emerald-500"/> Top Categorie</h3>
                       <div className="flex-1 space-y-3">
                         {insights.topAstCats.length === 0 ? <p className="text-xs text-slate-400">Nessun ticket</p> : 
                           insights.topAstCats.map((cat, i) => (
@@ -273,14 +309,13 @@ export default function App() {
                               <span className="text-xs font-bold text-slate-700 truncate pr-2">{cat.name}</span>
                               <span className="bg-emerald-50 text-emerald-700 font-black text-xs px-2 py-1 rounded-md">{cat.count}</span>
                             </div>
-                          ))
-                        }
+                          ))}
                       </div>
+                      <div className="mt-3 text-center text-[10px] font-bold text-emerald-500 uppercase tracking-wider">Vedi analisi &rarr;</div>
                     </div>
                   </div>
                 </section>
 
-                {/* REPARTO SVILUPPO (Amber Theme) */}
                 <section>
                   <SectionTitle icon={Code} title="Sviluppo & Bug Fixing" colorClass="text-amber-600" bgClass="bg-amber-100" />
                   <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
@@ -289,8 +324,7 @@ export default function App() {
                       <KPICard label="Bug Risolti (Sett.)" current={kpi.curr.devOut} previous={kpi.prev.devOut} icon={Zap} colorClass="text-amber-500" />
                       <KPICard label="Tempo Sviluppo" current={kpi.curr.slaDev} previous={kpi.prev.slaDev} type="time" invert icon={Clock} colorClass="text-amber-500" />
                     </div>
-                    {/* BACKLOG STATUS WIDGET */}
-                    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 flex flex-col">
+                    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 flex flex-col cursor-pointer hover:border-amber-200 transition-all" onClick={() => setView('sviluppo')}>
                       <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2"><Bug size={14} className="text-rose-500"/> Emergenze Backlog</h3>
                       <div className="flex-1 space-y-3">
                         {insights.topDevCats.length === 0 ? <p className="text-xs text-emerald-500 font-bold">Nessun bug aperto! 🎉</p> : 
@@ -299,22 +333,91 @@ export default function App() {
                               <span className="text-xs font-bold text-slate-700 truncate pr-2">{cat.name}</span>
                               <span className="bg-rose-50 text-rose-700 font-black text-xs px-2 py-1 rounded-md">{cat.count}</span>
                             </div>
-                          ))
-                        }
+                          ))}
                       </div>
+                      <div className="mt-3 text-center text-[10px] font-bold text-amber-500 uppercase tracking-wider">Vedi backlog &rarr;</div>
                     </div>
                   </div>
                 </section>
               </div>
             )}
 
-            {/* VISTE DI DETTAGLIO */}
-            {view !== 'dashboard' && (
-              <div className="flex flex-col items-center justify-center h-96 bg-white rounded-3xl border border-slate-200 shadow-sm border-dashed">
-                <LayoutDashboard size={48} className="text-slate-200 mb-4" />
-                <h2 className="text-xl font-bold text-slate-800">Sezione Dettaglio in arrivo</h2>
-                <p className="text-slate-500 mt-2 text-sm text-center max-w-md">I macro-dati sono tutti sulla Panoramica. Se desideri anche qui grafici specifici, possiamo costruirli su misura.</p>
-                <button onClick={() => setView('dashboard')} className="mt-6 px-6 py-2 bg-slate-900 text-white font-bold rounded-xl shadow-md">Torna alla Panoramica</button>
+            {/* DETTAGLIO: CHAT */}
+            {view === 'chat' && (
+              <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
+                <SectionTitle icon={Users} title="Analisi Dettagliata Reparto Chat" colorClass="text-blue-600" bgClass="bg-blue-100" />
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  <div className="lg:col-span-2">
+                    <ChartContainer title="Trend Volumi Giornalieri" isEmpty={trends.every(t => t.chatVol === 0)}>
+                      <BarChart data={trends} margin={{ top: 20, right: 0, left: -20, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                        <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fontSize:12, fill:'#64748b', textTransform:'capitalize'}} />
+                        <YAxis axisLine={false} tickLine={false} tick={{fontSize:12, fill:'#64748b'}} />
+                        <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius:'12px', border:'none', boxShadow:'0 10px 15px -3px rgba(0,0,0,0.1)'}} />
+                        <Bar dataKey="chatVol" fill="#3b82f6" radius={[4,4,0,0]} name="Chat Gestite" barSize={40}/>
+                      </BarChart>
+                    </ChartContainer>
+                  </div>
+                  <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col h-[320px]">
+                    <h3 className="font-bold text-slate-800 mb-4 flex-shrink-0 text-sm uppercase tracking-wide flex items-center gap-2"><Trophy size={16} className="text-amber-500"/> Leaderboard Operatori</h3>
+                    <div className="flex-1 overflow-auto pr-2 space-y-2">
+                      {insights.allOps.length === 0 ? <p className="text-xs text-slate-400 text-center mt-10">Nessuna chat registrata</p> :
+                        insights.allOps.map((op, i) => (
+                          <div key={i} className="flex justify-between items-center p-3 bg-slate-50 rounded-xl border border-slate-100">
+                            <div>
+                              <p className="text-sm font-bold text-slate-800">{op.name}</p>
+                              <p className="text-[10px] font-medium text-slate-500 flex items-center gap-1 mt-0.5"><Clock size={10}/> Attesa: {formatSeconds(op.avgWait)}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-sm font-black text-blue-600">{op.count} <span className="text-[10px] font-medium text-slate-400">chat</span></p>
+                              <p className="text-[11px] font-bold text-amber-500 flex items-center justify-end gap-1 mt-0.5">{op.avgRating} <Star size={10} className="fill-amber-500"/></p>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* DETTAGLIO: ASSISTENZA & SVILUPPO */}
+            {(view === 'assistenza' || view === 'sviluppo') && (
+              <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
+                <SectionTitle 
+                  icon={view === 'assistenza' ? AlertCircle : Code} 
+                  title={`Analisi Dettagliata Ticket ${view === 'assistenza' ? 'Assistenza' : 'Sviluppo'}`} 
+                  colorClass={view === 'assistenza' ? 'text-emerald-600' : 'text-amber-600'} 
+                  bgClass={view === 'assistenza' ? 'bg-emerald-100' : 'bg-amber-100'} 
+                />
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  <div className="lg:col-span-2">
+                    <ChartContainer title="Rapporto Ticket Creati vs Risolti" isEmpty={trends.every(t => view === 'assistenza' ? (t.astIn === 0 && t.astOut === 0) : (t.devIn === 0 && t.devOut === 0))}>
+                      <BarChart data={trends} margin={{ top: 20, right: 0, left: -20, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                        <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fontSize:12, fill:'#64748b', textTransform:'capitalize'}} />
+                        <YAxis axisLine={false} tickLine={false} tick={{fontSize:12, fill:'#64748b'}} />
+                        <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius:'12px', border:'none', boxShadow:'0 10px 15px -3px rgba(0,0,0,0.1)'}} />
+                        <Legend verticalAlign="top" height={36} iconType="circle"/>
+                        <Bar dataKey={view === 'assistenza' ? 'astIn' : 'devIn'} fill="#94a3b8" radius={[4,4,0,0]} name="Creati" barSize={30}/>
+                        <Bar dataKey={view === 'assistenza' ? 'astOut' : 'devOut'} fill={view === 'assistenza' ? '#10b981' : '#f59e0b'} radius={[4,4,0,0]} name="Risolti" barSize={30}/>
+                      </BarChart>
+                    </ChartContainer>
+                  </div>
+                  <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col h-[320px]">
+                    <h3 className="font-bold text-slate-800 mb-4 flex-shrink-0 text-sm uppercase tracking-wide flex items-center gap-2">
+                      <Tag size={16} className={view === 'assistenza' ? 'text-emerald-500' : 'text-amber-500'}/> Distribuzione Categorie
+                    </h3>
+                    <div className="flex-1 overflow-auto pr-2 space-y-2">
+                      {(view === 'assistenza' ? insights.allAstCats : insights.allDevCats).length === 0 ? <p className="text-xs text-slate-400 text-center mt-10">Nessun dato presente</p> :
+                        (view === 'assistenza' ? insights.allAstCats : insights.allDevCats).map((cat, i) => (
+                          <div key={i} className="flex justify-between items-center p-3 bg-slate-50 rounded-xl border border-slate-100">
+                            <span className="text-sm font-bold text-slate-700 truncate pr-4">{cat.name}</span>
+                            <span className={`px-3 py-1 rounded-lg font-black text-xs ${view === 'assistenza' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{cat.count}</span>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
             
