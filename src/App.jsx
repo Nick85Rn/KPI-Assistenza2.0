@@ -6,7 +6,7 @@ import {
 import { 
   Database, Users, AlertCircle, Code, LayoutDashboard, 
   ChevronLeft, ChevronRight, TrendingUp, TrendingDown, 
-  RefreshCw, X, FileText, ClipboardCheck, Star, Trophy, Target, Clock, Tag, Bug, Zap
+  RefreshCw, X, FileText, ClipboardCheck, Star, Trophy, Target, Clock, Tag, Bug, Zap, CheckCircle2
 } from 'lucide-react';
 import { 
   format, subWeeks, addWeeks, startOfWeek, endOfWeek, 
