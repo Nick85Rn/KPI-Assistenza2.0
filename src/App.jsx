@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { 
   format, subWeeks, addWeeks, startOfWeek, endOfWeek, 
+  startOfMonth, endOfMonth, subMonths, addMonths,
   isWithinInterval, getISOWeek, eachDayOfInterval, startOfDay, endOfDay 
 } from 'date-fns';
 import { it } from 'date-fns/locale'; 
@@ -93,6 +94,7 @@ const ChartContainer = ({ title, children, isEmpty, height = 320 }) => (
 // --- MAIN APP ---
 export default function App() {
   const [view, setView] = useState('dashboard');
+  const [timeframe, setTimeframe] = useState('week'); // 'week' | 'month'
   const [data, setData] = useState({ chat: [], ast: [], dev: [] });
   const [loading, setLoading] = useState(false);
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -115,7 +117,7 @@ export default function App() {
     } catch (err) { console.error(err); } finally { setLoading(false); }
   };
 
-  // --- MOTORE DI IMPORTAZIONE CSV (PARSER INTELLIGENTE) ---
+  // --- MOTORE DI IMPORTAZIONE CSV ---
   const handleChatImport = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -124,7 +126,6 @@ export default function App() {
     reader.onload = async (evt) => {
       const text = evt.target.result;
       
-      // Controlli di sicurezza
       if (text.includes("Brand Performance") || text.includes("Website Traffic")) {
         alert("🛑 ALT! Hai caricato il 'Brand Report'. Usa il file Cronologia!"); e.target.value = ''; return;
       }
@@ -136,14 +137,12 @@ export default function App() {
         setLoading(true);
         const lines = text.split('\n');
         
-        // Cerca la riga di intestazione (header)
         let headerIdx = -1;
         for (let i = 0; i < 15; i++) {
           if (lines[i] && lines[i].includes('ID della conversazione')) { headerIdx = i; break; }
         }
         if (headerIdx === -1) throw new Error("Intestazioni non trovate nel file CSV. Assicurati che sia il file 'Cronologia'.");
 
-        // Funzione per splittare le righe CSV ignorando le virgole dentro le virgolette
         const parseCSVRow = (row) => {
           const result = []; let inside = false; let current = '';
           for (let i = 0; i < row.length; i++) {
@@ -158,21 +157,16 @@ export default function App() {
         const headers = parseCSVRow(lines[headerIdx]);
         const records = [];
 
-        // Parsing delle righe
         for (let i = headerIdx + 1; i < lines.length; i++) {
           if (!lines[i].trim()) continue;
           const values = parseCSVRow(lines[i]);
-          if (values.length < 10) continue; // Salta righe vuote o corrotte
+          if (values.length < 10) continue; 
 
-          const getVal = (col) => {
-            const idx = headers.indexOf(col);
-            return idx !== -1 ? values[idx] : null;
-          };
+          const getVal = (col) => { const idx = headers.indexOf(col); return idx !== -1 ? values[idx] : null; };
 
           const chatId = getVal('ID della conversazione');
           if (!chatId) continue;
 
-          // Conversione magica dai millisecondi (Epoch) a Date reali ISO per Supabase
           const createdMs = Number(getVal('Ora di creazione (in millisecondi)'));
           const closedMs = Number(getVal('Ora di fine (in millisecondi)'));
 
@@ -191,30 +185,40 @@ export default function App() {
 
         if (records.length === 0) throw new Error("Nessuna chat valida trovata nel file da importare.");
 
-        // Caricamento nel database con Upsert (aggiorna se esiste già l'ID)
         const { error } = await supabase.from('zoho_raw_chats').upsert(records, { onConflict: 'chat_id' });
         if (error) throw error;
 
         alert(`✅ IMPORTAZIONE COMPLETATA!\n\nSono state caricate e sincronizzate correttamente ${records.length} chat storiche nel database.`);
-        fetchAll(); // Aggiorna immediatamente la dashboard!
+        fetchAll(); 
 
       } catch (err) {
         console.error(err);
         alert("❌ Errore durante l'elaborazione del file: " + err.message);
       } finally {
         setLoading(false);
-        e.target.value = ''; // Resetta l'input file
+        e.target.value = ''; 
       }
     };
     reader.readAsText(file);
   };
 
+  // --- LOGICA DEL TEMPO (Settimana vs Mese) ---
+  const handlePrevPeriod = () => setCurrentDate(prev => timeframe === 'week' ? subWeeks(prev, 1) : subMonths(prev, 1));
+  const handleNextPeriod = () => setCurrentDate(prev => timeframe === 'week' ? addWeeks(prev, 1) : addMonths(prev, 1));
+
   const periods = useMemo(() => {
-    const s = startOfWeek(currentDate, { weekStartsOn: 1 });
-    const e = endOfWeek(currentDate, { weekStartsOn: 1 });
-    const label = `Sett. ${getISOWeek(currentDate)} (${format(s, 'dd MMM', {locale: it})} - ${format(e, 'dd MMM', {locale: it})})`;
-    return { curr: { start: s, end: e, label }, prev: { start: subWeeks(s, 1), end: subWeeks(e, 1) } };
-  }, [currentDate]);
+    if (timeframe === 'week') {
+      const s = startOfWeek(currentDate, { weekStartsOn: 1 });
+      const e = endOfWeek(currentDate, { weekStartsOn: 1 });
+      const label = `Sett. ${getISOWeek(currentDate)} (${format(s, 'dd MMM', {locale: it})} - ${format(e, 'dd MMM', {locale: it})})`;
+      return { curr: { start: s, end: e, label }, prev: { start: subWeeks(s, 1), end: subWeeks(e, 1) } };
+    } else {
+      const s = startOfMonth(currentDate);
+      const e = endOfMonth(currentDate);
+      const label = format(currentDate, 'MMMM yyyy', {locale: it}).toUpperCase();
+      return { curr: { start: s, end: e, label }, prev: { start: subMonths(s, 1), end: subMonths(e, 1) } };
+    }
+  }, [currentDate, timeframe]);
 
   // --- KPI & INSIGHTS ENGINE ---
   const kpi = useMemo(() => {
@@ -239,8 +243,9 @@ export default function App() {
   const trends = useMemo(() => {
     return eachDayOfInterval({ start: periods.curr.start, end: periods.curr.end }).map(day => {
       const dStart = startOfDay(day); const dEnd = endOfDay(day);
+      const dateLabel = timeframe === 'week' ? format(day, 'EEE', {locale: it}) : format(day, 'd MMM', {locale: it});
       return {
-        date: format(day, 'EEE', {locale: it}),
+        date: dateLabel,
         chatVol: data.chat.filter(x => safeInRange(x.created_time, dStart, dEnd)).length,
         astIn: data.ast.filter(x => safeInRange(x.created_time, dStart, dEnd)).length,
         astOut: data.ast.filter(x => safeInRange(x.closed_time, dStart, dEnd)).length,
@@ -248,7 +253,7 @@ export default function App() {
         devOut: data.dev.filter(x => safeInRange(x.closed_time, dStart, dEnd)).length,
       };
     });
-  }, [data, periods.curr]);
+  }, [data, periods.curr, timeframe]);
 
   const insights = useMemo(() => {
     const chats = data.chat.filter(x => safeInRange(x.created_time, periods.curr.start, periods.curr.end));
@@ -275,6 +280,8 @@ export default function App() {
 
   const handleGenerateReport = () => {
     const c = kpi.curr; const p = kpi.prev;
+    const periodName = timeframe === 'week' ? 'In questa settimana' : 'In questo mese';
+    const periodLabelPrec = timeframe === 'week' ? 'sett. prec.' : 'mese prec.';
 
     const formatTrend = (curr, prev, formatter, invert = false) => {
         const diff = curr - prev;
@@ -290,11 +297,11 @@ export default function App() {
 🗓️ Periodo: ${periods.curr.label}
 
 📝 SINTESI GENERALE:
-In questa settimana il team ha gestito un totale di ${c.chatVol} conversazioni, garantendo un tempo di attesa medio di ${formatSeconds(c.chatWait)} per i nostri clienti. ${insights.topOps.length > 0 ? `Ottimo lavoro per ${insights.topOps[0].name} con ${insights.topOps[0].count} chat prese in carico.` : ''}
+${periodName} il team ha gestito un totale di ${c.chatVol} conversazioni, garantendo un tempo di attesa medio di ${formatSeconds(c.chatWait)} per i nostri clienti. ${insights.topOps.length > 0 ? `Ottimo lavoro per ${insights.topOps[0].name} con ${insights.topOps[0].count} chat prese in carico.` : ''}
 Sul fronte tecnico, il reparto Assistenza ha ricevuto ${c.astIn} nuovi ticket, riuscendo a chiuderne ${c.astOut} mantenendo uno SLA medio di ${formatTime(c.slaAst)}. 
 Contemporaneamente, il team di Sviluppo ha lavorato sul debito tecnico correggendo ${c.devOut} bug, portando il backlog attivo a ${c.backlog} task totali.
 
-⚡ INDICATORI CHIAVE E TREND (VS SETT. PREC.):
+⚡ INDICATORI CHIAVE E TREND (VS ${periodLabelPrec.toUpperCase()}):
 
 💬 REPARTO CHAT
 • Volumi Gestiti: ${c.chatVol} (${formatTrend(c.chatVol, p.chatVol, null)})
@@ -342,10 +349,21 @@ Generato automaticamente da Pienissimo.bi`;
       <div className="flex-1 flex flex-col h-full overflow-hidden">
         {/* TOPBAR */}
         <header className="bg-white/80 backdrop-blur-md border-b border-slate-200 px-8 py-4 flex justify-between items-center z-10 sticky top-0">
-          <div className="flex items-center gap-1 bg-slate-100 p-1.5 rounded-xl border border-slate-200 shadow-inner">
-            <button onClick={() => setCurrentDate(subWeeks(currentDate,1))} className="p-1.5 hover:bg-white rounded-lg transition-all"><ChevronLeft size={16}/></button>
-            <span className="text-xs font-black px-4 uppercase tracking-widest text-slate-700">{periods.curr.label}</span>
-            <button onClick={() => setCurrentDate(addWeeks(currentDate,1))} className="p-1.5 hover:bg-white rounded-lg transition-all"><ChevronRight size={16}/></button>
+          <div className="flex items-center gap-4">
+            
+            {/* TOGGLE MESE/SETTIMANA */}
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 shadow-inner">
+              <button onClick={() => setTimeframe('week')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${timeframe === 'week' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>Settimana</button>
+              <button onClick={() => setTimeframe('month')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${timeframe === 'month' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>Mese</button>
+            </div>
+
+            {/* NAVIGATORE DATE */}
+            <div className="flex items-center gap-1 bg-slate-100 p-1.5 rounded-xl border border-slate-200 shadow-inner">
+              <button onClick={handlePrevPeriod} className="p-1.5 hover:bg-white rounded-lg transition-all"><ChevronLeft size={16}/></button>
+              <span className="text-xs font-black px-4 uppercase tracking-widest text-slate-700">{periods.curr.label}</span>
+              <button onClick={handleNextPeriod} className="p-1.5 hover:bg-white rounded-lg transition-all"><ChevronRight size={16}/></button>
+            </div>
+
           </div>
           <div className="flex items-start gap-4">
             <button onClick={handleGenerateReport} className="flex items-center gap-2 px-4 h-[36px] bg-white border border-slate-200 hover:border-slate-300 text-slate-700 rounded-xl text-xs font-bold transition-all shadow-sm"><FileText size={14} /> Report Executive</button>
@@ -476,13 +494,13 @@ Generato automaticamente da Pienissimo.bi`;
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   <div className="lg:col-span-2">
-                    <ChartContainer title="Trend Volumi Giornalieri" isEmpty={trends.every(t => t.chatVol === 0)}>
+                    <ChartContainer title={`Trend Volumi Giornalieri (${timeframe === 'month' ? 'Mensile' : 'Settimanale'})`} isEmpty={trends.every(t => t.chatVol === 0)}>
                       <BarChart data={trends} margin={{ top: 20, right: 0, left: -20, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                        <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fontSize:12, fill:'#64748b', textTransform:'capitalize'}} />
+                        <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fontSize:10, fill:'#64748b', textTransform:'capitalize'}} interval={timeframe === 'month' ? 'preserveStartEnd' : 0} />
                         <YAxis axisLine={false} tickLine={false} tick={{fontSize:12, fill:'#64748b'}} />
                         <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius:'12px', border:'none', boxShadow:'0 10px 15px -3px rgba(0,0,0,0.1)'}} />
-                        <Bar dataKey="chatVol" fill="#3b82f6" radius={[4,4,0,0]} name="Chat Gestite" barSize={40}/>
+                        <Bar dataKey="chatVol" fill="#3b82f6" radius={[4,4,0,0]} name="Chat Gestite" barSize={timeframe === 'month' ? 12 : 40}/>
                       </BarChart>
                     </ChartContainer>
                   </div>
@@ -518,15 +536,15 @@ Generato automaticamente da Pienissimo.bi`;
                 />
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   <div className="lg:col-span-2">
-                    <ChartContainer title="Rapporto Ticket Creati vs Risolti" isEmpty={trends.every(t => view === 'assistenza' ? (t.astIn === 0 && t.astOut === 0) : (t.devIn === 0 && t.devOut === 0))}>
+                    <ChartContainer title={`Rapporto Ticket Creati vs Risolti (${timeframe === 'month' ? 'Mensile' : 'Settimanale'})`} isEmpty={trends.every(t => view === 'assistenza' ? (t.astIn === 0 && t.astOut === 0) : (t.devIn === 0 && t.devOut === 0))}>
                       <BarChart data={trends} margin={{ top: 20, right: 0, left: -20, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                        <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fontSize:12, fill:'#64748b', textTransform:'capitalize'}} />
+                        <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fontSize:10, fill:'#64748b', textTransform:'capitalize'}} interval={timeframe === 'month' ? 'preserveStartEnd' : 0} />
                         <YAxis axisLine={false} tickLine={false} tick={{fontSize:12, fill:'#64748b'}} />
                         <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius:'12px', border:'none', boxShadow:'0 10px 15px -3px rgba(0,0,0,0.1)'}} />
                         <Legend verticalAlign="top" height={36} iconType="circle"/>
-                        <Bar dataKey={view === 'assistenza' ? 'astIn' : 'devIn'} fill="#94a3b8" radius={[4,4,0,0]} name="Creati" barSize={30}/>
-                        <Bar dataKey={view === 'assistenza' ? 'astOut' : 'devOut'} fill={view === 'assistenza' ? '#10b981' : '#f59e0b'} radius={[4,4,0,0]} name="Risolti" barSize={30}/>
+                        <Bar dataKey={view === 'assistenza' ? 'astIn' : 'devIn'} fill="#94a3b8" radius={[4,4,0,0]} name="Creati" barSize={timeframe === 'month' ? 10 : 30}/>
+                        <Bar dataKey={view === 'assistenza' ? 'astOut' : 'devOut'} fill={view === 'assistenza' ? '#10b981' : '#f59e0b'} radius={[4,4,0,0]} name="Risolti" barSize={timeframe === 'month' ? 10 : 30}/>
                       </BarChart>
                     </ChartContainer>
                   </div>
