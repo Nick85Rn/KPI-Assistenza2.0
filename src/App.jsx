@@ -6,7 +6,7 @@ import {
 import { 
   Database, Users, AlertCircle, Code, LayoutDashboard, 
   ChevronLeft, ChevronRight, TrendingUp, TrendingDown, 
-  RefreshCw, X, FileText, ClipboardCheck, Star, Trophy, Target, Clock, Tag, Bug, Zap, CheckCircle2, Copy
+  RefreshCw, X, FileText, ClipboardCheck, Trophy, Target, Clock, Tag, Bug, Zap, CheckCircle2, Copy
 } from 'lucide-react';
 import { 
   format, subWeeks, addWeeks, startOfWeek, endOfWeek, 
@@ -42,8 +42,8 @@ const KPICard = ({ label, current, previous, unit = '', invert = false, type = '
   const isPositive = invert ? diff <= 0 : diff >= 0;
   const trendColor = diff === 0 ? 'text-slate-400 bg-slate-100' : isPositive ? 'text-emerald-600 bg-emerald-100' : 'text-rose-600 bg-rose-100';
   
-  let displayCurrent = type === 'time' ? formatTime(current) : type === 'seconds' ? formatSeconds(current) : type === 'rating' ? current.toFixed(1) : formatNumber(current);
-  let displayDiff = type === 'time' ? formatTime(Math.abs(diff)) : type === 'seconds' ? formatSeconds(Math.abs(diff)) : type === 'rating' ? Math.abs(diff).toFixed(1) : formatNumber(Math.abs(diff));
+  let displayCurrent = type === 'time' ? formatTime(current) : type === 'seconds' ? formatSeconds(current) : formatNumber(current);
+  let displayDiff = type === 'time' ? formatTime(Math.abs(diff)) : type === 'seconds' ? formatSeconds(Math.abs(diff)) : formatNumber(Math.abs(diff));
 
   return (
     <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all group">
@@ -98,6 +98,7 @@ export default function App() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [generatedReport, setGeneratedReport] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState(new Date());
 
   useEffect(() => { fetchAll(); }, []);
 
@@ -110,6 +111,7 @@ export default function App() {
         supabase.from('zoho_raw_sviluppo').select('*')
       ]);
       setData({ chat: c.data||[], ast: a.data||[], dev: d.data||[] });
+      setLastUpdated(new Date());
     } catch (err) { console.error(err); } finally { setLoading(false); }
   };
 
@@ -125,8 +127,6 @@ export default function App() {
     const calc = (start, end) => {
       const chats = data.chat.filter(x => safeInRange(x.created_time, start, end));
       const respChat = chats.length > 0 ? chats.reduce((a,b) => a + (Number(b.waiting_time_seconds)||0), 0) / chats.length : 0;
-      const rated = chats.filter(x => x.rating > 0);
-      const avgRating = rated.length > 0 ? rated.reduce((a,b) => a + Number(b.rating), 0) / rated.length : 0;
 
       const astIn = data.ast.filter(x => safeInRange(x.created_time, start, end));
       const astOut = data.ast.filter(x => safeInRange(x.closed_time, start, end));
@@ -137,7 +137,7 @@ export default function App() {
       const slaDev = devOut.length > 0 ? devOut.reduce((a,x) => a + diffInMinutes(x.closed_time, x.created_time), 0) / devOut.length : 0;
       const backlog = data.dev.filter(x => !x.status?.toLowerCase().includes('chius') && !x.status?.toLowerCase().includes('clos')).length;
 
-      return { chatVol: chats.length, chatWait: respChat, chatRating: avgRating, astIn: astIn.length, astOut: astOut.length, slaAst, devIn: devIn.length, devOut: devOut.length, slaDev, backlog };
+      return { chatVol: chats.length, chatWait: respChat, astIn: astIn.length, astOut: astOut.length, slaAst, devIn: devIn.length, devOut: devOut.length, slaDev, backlog };
     };
     return { curr: calc(periods.curr.start, periods.curr.end), prev: calc(periods.prev.start, periods.prev.end) };
   }, [data, periods]);
@@ -161,13 +161,12 @@ export default function App() {
     const opsMap = {};
     chats.forEach(c => {
        const op = c.operator || 'Non Assegnato';
-       if(!opsMap[op]) opsMap[op] = { name: op, count: 0, ratingSum: 0, ratedCount: 0, waitSum: 0 };
+       if(!opsMap[op]) opsMap[op] = { name: op, count: 0, waitSum: 0 };
        opsMap[op].count++;
        opsMap[op].waitSum += (Number(c.waiting_time_seconds)||0);
-       if(c.rating > 0) { opsMap[op].ratingSum += c.rating; opsMap[op].ratedCount++; }
     });
     const allOps = Object.values(opsMap).map(o => ({
-       name: o.name, count: o.count, avgWait: o.count > 0 ? o.waitSum / o.count : 0, avgRating: o.ratedCount > 0 ? (o.ratingSum / o.ratedCount).toFixed(1) : '-'
+       name: o.name, count: o.count, avgWait: o.count > 0 ? o.waitSum / o.count : 0
     })).sort((a,b) => b.count - a.count);
 
     const ast = data.ast.filter(x => safeInRange(x.created_time, periods.curr.start, periods.curr.end));
@@ -182,24 +181,38 @@ export default function App() {
 
   const handleGenerateReport = () => {
     const c = kpi.curr; const p = kpi.prev;
+
+    const formatTrend = (curr, prev, formatter, invert = false) => {
+        const diff = curr - prev;
+        if (diff === 0) return `➖ Stabile`;
+        const isGood = invert ? diff < 0 : diff > 0;
+        const sign = diff > 0 ? '+' : '-';
+        const icon = isGood ? '🟢' : '🔴';
+        const absVal = formatter ? formatter(Math.abs(diff)) : Math.abs(diff);
+        return `${icon} ${sign}${absVal}`;
+    };
+
     const reportText = `📊 REPORT DIREZIONALE PIENISSIMO
 🗓️ Periodo: ${periods.curr.label}
------------------------------------------
-👤 [REPARTO CHAT & TEAM]
-• Volumi: ${c.chatVol} chat gestite (vs ${p.chatVol} sett. prec.)
-• Tempo attesa medio cliente: ${formatSeconds(c.chatWait)}
-• Qualità percepita: ${c.chatRating > 0 ? c.chatRating.toFixed(1) + ' / 5.0' : 'Nessun voto'}
-🥇 Miglior operatore per volumi: ${insights.topOps.length > 0 ? insights.topOps[0].name : 'N/A'} (${insights.topOps.length > 0 ? insights.topOps[0].count : 0} chat)
 
-🛠️ [ASSISTENZA TECNICA]
-• Nuovi Ticket Entranti: ${c.astIn}
-• Ticket Risolti/Chiusi: ${c.astOut}
-• Tempo medio di risoluzione (SLA): ${formatTime(c.slaAst)}
+📝 SINTESI GENERALE:
+In questa settimana il team ha gestito un totale di ${c.chatVol} conversazioni, garantendo un tempo di attesa medio di ${formatSeconds(c.chatWait)} per i nostri clienti. ${insights.topOps.length > 0 ? `Ottimo lavoro per ${insights.topOps[0].name} con ${insights.topOps[0].count} chat prese in carico.` : ''}
+Sul fronte tecnico, il reparto Assistenza ha ricevuto ${c.astIn} nuovi ticket, riuscendo a chiuderne ${c.astOut} mantenendo uno SLA medio di ${formatTime(c.slaAst)}. 
+Contemporaneamente, il team di Sviluppo ha lavorato sul debito tecnico correggendo ${c.devOut} bug, portando il backlog attivo a ${c.backlog} task totali.
 
-💻 [SVILUPPO & BUG FIXING]
-• Bug risolti questa settimana: ${c.devOut}
-• Backlog Attivo (Debito tecnico): ${c.backlog} bug aperti
-• Categoria più critica: ${insights.topDevCats.length > 0 ? insights.topDevCats[0].name : 'Nessuna'}
+⚡ INDICATORI CHIAVE E TREND (VS SETT. PREC.):
+
+💬 REPARTO CHAT
+• Volumi Gestiti: ${c.chatVol} (${formatTrend(c.chatVol, p.chatVol, null)})
+• Tempo Attesa Medio: ${formatSeconds(c.chatWait)} (${formatTrend(c.chatWait, p.chatWait, formatSeconds, true)})
+
+🛠️ SUPPORTO TECNICO
+• Ticket Chiusi: ${c.astOut} (${formatTrend(c.astOut, p.astOut, null)})
+• SLA di Risoluzione: ${formatTime(c.slaAst)} (${formatTrend(c.slaAst, p.slaAst, formatTime, true)})
+
+💻 SVILUPPO E BUG FIXING
+• Bug Risolti: ${c.devOut} (${formatTrend(c.devOut, p.devOut, null)})
+• Backlog Attivo: ${c.backlog} (${formatTrend(c.backlog, p.backlog, null, true)})
 -----------------------------------------
 Generato automaticamente da Pienissimo.bi`;
 
@@ -240,11 +253,14 @@ Generato automaticamente da Pienissimo.bi`;
             <span className="text-xs font-black px-4 uppercase tracking-widest text-slate-700">{periods.curr.label}</span>
             <button onClick={() => setCurrentDate(addWeeks(currentDate,1))} className="p-1.5 hover:bg-white rounded-lg transition-all"><ChevronRight size={16}/></button>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-4">
             <button onClick={handleGenerateReport} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 hover:border-slate-300 text-slate-700 rounded-xl text-xs font-bold transition-all shadow-sm"><FileText size={14} /> Report Executive</button>
-            <button onClick={fetchAll} className="flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-md transition-all">
-              <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Aggiorna Dati
-            </button>
+            <div className="flex flex-col items-end">
+              <button onClick={fetchAll} className="flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-md transition-all">
+                <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Aggiorna Dati
+              </button>
+              <span className="text-[10px] text-slate-400 mt-1 font-medium mr-1">Ultimo agg.: {format(lastUpdated, 'HH:mm')}</span>
+            </div>
           </div>
         </header>
 
@@ -268,26 +284,26 @@ Generato automaticamente da Pienissimo.bi`;
             {/* VISTA DASHBOARD GLOBALE */}
             {view === 'dashboard' && (
               <div className="space-y-10">
+                {/* Reparto Chat */}
                 <section>
                   <SectionTitle icon={Users} title="Performance Chat & Team" colorClass="text-blue-600" bgClass="bg-blue-100" />
                   <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-                    <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
                       <KPICard label="Chat Gestite" current={kpi.curr.chatVol} previous={kpi.prev.chatVol} icon={Target} colorClass="text-blue-500" />
                       <KPICard label="Attesa Media" current={kpi.curr.chatWait} previous={kpi.prev.chatWait} type="seconds" invert icon={Clock} colorClass="text-blue-500" />
-                      <KPICard label="Soddisfazione" current={kpi.curr.chatRating} previous={kpi.prev.chatRating} type="rating" unit="/ 5" icon={Star} colorClass="text-amber-400" />
                     </div>
-                    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 flex flex-col cursor-pointer hover:border-blue-200 transition-all" onClick={() => setView('chat')}>
-                      <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2"><Trophy size={14} className="text-amber-500"/> Top Operatori</h3>
+                    <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm p-5 flex flex-col cursor-pointer hover:border-blue-200 transition-all" onClick={() => setView('chat')}>
+                      <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2"><Trophy size={14} className="text-amber-500"/> Top Operatori (Tempi e Volumi)</h3>
                       <div className="flex-1 space-y-3">
                         {insights.topOps.length === 0 ? <p className="text-xs text-slate-400">Nessun dato</p> : 
                           insights.topOps.map((op, i) => (
                             <div key={i} className="flex justify-between items-center pb-2 border-b border-slate-50 last:border-0">
-                              <div><span className="text-sm font-bold text-slate-800">{op.name}</span><div className="flex items-center gap-1 text-[10px] text-amber-500 font-bold mt-0.5"><Star size={10} className="fill-amber-500"/> {op.avgRating}</div></div>
-                              <span className="bg-blue-50 text-blue-700 font-black text-xs px-2 py-1 rounded-md">{op.count}</span>
+                              <div><span className="text-sm font-bold text-slate-800">{op.name}</span><div className="text-[10px] text-slate-500 mt-0.5">Attesa media: {formatSeconds(op.avgWait)}</div></div>
+                              <span className="bg-blue-50 text-blue-700 font-black text-xs px-2 py-1 rounded-md">{op.count} chat</span>
                             </div>
                           ))}
                       </div>
-                      <div className="mt-3 text-center text-[10px] font-bold text-blue-500 uppercase tracking-wider">Vedi tutti &rarr;</div>
+                      <div className="mt-3 text-center text-[10px] font-bold text-blue-500 uppercase tracking-wider">Vedi Leaderboard Completa &rarr;</div>
                     </div>
                   </div>
                 </section>
@@ -359,18 +375,17 @@ Generato automaticamente da Pienissimo.bi`;
                     </ChartContainer>
                   </div>
                   <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col h-[320px]">
-                    <h3 className="font-bold text-slate-800 mb-4 flex-shrink-0 text-sm uppercase tracking-wide flex items-center gap-2"><Trophy size={16} className="text-amber-500"/> Leaderboard Operatori</h3>
+                    <h3 className="font-bold text-slate-800 mb-4 flex-shrink-0 text-sm uppercase tracking-wide flex items-center gap-2"><Trophy size={16} className="text-amber-500"/> Leaderboard Completa</h3>
                     <div className="flex-1 overflow-auto pr-2 space-y-2">
                       {insights.allOps.length === 0 ? <p className="text-xs text-slate-400 text-center mt-10">Nessuna chat registrata</p> :
                         insights.allOps.map((op, i) => (
                           <div key={i} className="flex justify-between items-center p-3 bg-slate-50 rounded-xl border border-slate-100">
                             <div>
                               <p className="text-sm font-bold text-slate-800">{op.name}</p>
-                              <p className="text-[10px] font-medium text-slate-500 flex items-center gap-1 mt-0.5"><Clock size={10}/> Attesa: {formatSeconds(op.avgWait)}</p>
+                              <p className="text-[10px] font-medium text-slate-500 mt-0.5">Attesa: {formatSeconds(op.avgWait)}</p>
                             </div>
                             <div className="text-right">
                               <p className="text-sm font-black text-blue-600">{op.count} <span className="text-[10px] font-medium text-slate-400">chat</span></p>
-                              <p className="text-[11px] font-bold text-amber-500 flex items-center justify-end gap-1 mt-0.5">{op.avgRating} <Star size={10} className="fill-amber-500"/></p>
                             </div>
                           </div>
                         ))}
