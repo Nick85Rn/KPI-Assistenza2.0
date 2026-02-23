@@ -696,8 +696,18 @@ Generato automaticamente da Pienissimo.bi`;
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   <div className="lg:col-span-2">
                     <ChartContainer title={`Classificazione Argomenti Trattati (${timeframe === 'month' ? 'Mese' : 'Settimana'})`} isEmpty={insightsFormazione.topTopics.length === 0}>
-                      <PieChart>
-                        <Pie data={insightsFormazione.topTopics} cx="50%" cy="50%" innerRadius={80} outerRadius={110} paddingAngle={5} dataKey="count" nameKey="name" label={({name, percent}) => `${name} ${(percent * 100).toFixed(0)}%`}>
+                      {/* GRAFICO A TORTA RIDIMENSIONATO */}
+                      <PieChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+                        <Pie 
+                          data={insightsFormazione.topTopics} 
+                          cx="50%" cy="50%" 
+                          innerRadius={60} 
+                          outerRadius={90} 
+                          paddingAngle={5} 
+                          dataKey="count" 
+                          nameKey="name" 
+                          label={({name, percent}) => `${name} ${(percent * 100).toFixed(0)}%`}
+                        >
                           {insightsFormazione.topTopics.map((entry, index) => (
                             <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                           ))}
