@@ -104,17 +104,46 @@ export default function App() {
 
   useEffect(() => { fetchAll(); }, []);
 
+  // AGGIORNATO: Motore di estrazione "Senza Limiti"
   const fetchAll = async () => {
     setLoading(true);
     try {
+      // Funzione che scarica i dati a blocchi di 1000 finché non finiscono
+      const fetchPaginated = async (table) => {
+        let allRecords = [];
+        let from = 0;
+        const step = 1000;
+        
+        while (true) {
+          const { data, error } = await supabase
+            .from(table)
+            .select('*')
+            .range(from, from + step - 1);
+            
+          if (error) throw error;
+          
+          allRecords = [...allRecords, ...data];
+          
+          if (data.length < step) break; // Abbiamo scaricato tutto!
+          from += step;
+        }
+        return allRecords;
+      };
+
       const [c, a, d] = await Promise.all([
-        supabase.from('zoho_raw_chats').select('*'),
-        supabase.from('zoho_raw_assistenza').select('*'),
-        supabase.from('zoho_raw_sviluppo').select('*')
+        fetchPaginated('zoho_raw_chats'),
+        fetchPaginated('zoho_raw_assistenza'),
+        fetchPaginated('zoho_raw_sviluppo')
       ]);
-      setData({ chat: c.data||[], ast: a.data||[], dev: d.data||[] });
+
+      setData({ chat: c, ast: a, dev: d });
       setLastUpdated(new Date());
-    } catch (err) { console.error(err); } finally { setLoading(false); }
+    } catch (err) { 
+      console.error(err); 
+      alert("Errore caricamento dati: " + err.message);
+    } finally { 
+      setLoading(false); 
+    }
   };
 
   // --- MOTORE DI IMPORTAZIONE CSV (PARSER AVANZATO) ---
@@ -136,7 +165,6 @@ export default function App() {
       try {
         setLoading(true);
 
-        // Funzione personalizzata che NON va a capo a meno che non sia fuori dalle virgolette
         const parseCSVAdvanced = (csvText) => {
           const rows = [];
           let currentRow = [];
@@ -149,7 +177,7 @@ export default function App() {
             
             if (inQuotes) {
               if (char === '"' && nextChar === '"') {
-                currentCell += '"'; i++;
+                currentCell += '"'; i++; 
               } else if (char === '"') {
                 inQuotes = false;
               } else {
@@ -159,10 +187,10 @@ export default function App() {
               if (char === '"') {
                 inQuotes = true;
               } else if (char === ',') {
-                currentRow.push(currentCell.trim());
+                currentRow.push(currentCell.trim()); 
                 currentCell = '';
               } else if (char === '\n' || char === '\r') {
-                if (char === '\r' && nextChar === '\n') i++; // salta carriage return
+                if (char === '\r' && nextChar === '\n') i++; 
                 currentRow.push(currentCell.trim());
                 if (currentRow.length > 1 || currentRow[0] !== '') {
                   rows.push(currentRow);
@@ -196,7 +224,6 @@ export default function App() {
         const headers = parsedRows[headerIdx];
         const records = [];
 
-        // Costruzione delle righe finali
         for (let i = headerIdx + 1; i < parsedRows.length; i++) {
           const values = parsedRows[i];
           if (values.length < 5) continue; 
@@ -224,7 +251,6 @@ export default function App() {
 
         if (records.length === 0) throw new Error("Nessuna chat valida trovata nel file da importare.");
 
-        // Caricamento in blocchi (Chunking) da 1000 righe per evitare sovraccarichi su Supabase
         const CHUNK_SIZE = 1000;
         let successCount = 0;
         
@@ -249,7 +275,6 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  // --- LOGICA DEL TEMPO (Settimana vs Mese) ---
   const handlePrevPeriod = () => setCurrentDate(prev => timeframe === 'week' ? subWeeks(prev, 1) : subMonths(prev, 1));
   const handleNextPeriod = () => setCurrentDate(prev => timeframe === 'week' ? addWeeks(prev, 1) : addMonths(prev, 1));
 
