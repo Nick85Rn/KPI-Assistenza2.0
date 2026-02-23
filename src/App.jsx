@@ -253,13 +253,13 @@ Generato automaticamente da Pienissimo.bi`;
             <span className="text-xs font-black px-4 uppercase tracking-widest text-slate-700">{periods.curr.label}</span>
             <button onClick={() => setCurrentDate(addWeeks(currentDate,1))} className="p-1.5 hover:bg-white rounded-lg transition-all"><ChevronRight size={16}/></button>
           </div>
-          <div className="flex items-center gap-4">
-            <button onClick={handleGenerateReport} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 hover:border-slate-300 text-slate-700 rounded-xl text-xs font-bold transition-all shadow-sm"><FileText size={14} /> Report Executive</button>
+          <div className="flex items-start gap-4">
+            <button onClick={handleGenerateReport} className="flex items-center gap-2 px-4 h-[36px] bg-white border border-slate-200 hover:border-slate-300 text-slate-700 rounded-xl text-xs font-bold transition-all shadow-sm"><FileText size={14} /> Report Executive</button>
             <div className="flex flex-col items-end">
-              <button onClick={fetchAll} className="flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-md transition-all">
+              <button onClick={fetchAll} className="flex items-center gap-2 px-4 h-[36px] bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-md transition-all">
                 <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Aggiorna Dati
               </button>
-              <span className="text-[10px] text-slate-400 mt-1 font-medium mr-1">Ultimo agg.: {format(lastUpdated, 'HH:mm')}</span>
+              <span className="text-[10px] text-slate-400 mt-1.5 font-medium mr-1">Ultimo agg.: {format(lastUpdated, 'HH:mm')}</span>
             </div>
           </div>
         </header>
