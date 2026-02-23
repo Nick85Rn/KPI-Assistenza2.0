@@ -117,7 +117,7 @@ export default function App() {
     } catch (err) { console.error(err); } finally { setLoading(false); }
   };
 
-  // --- MOTORE DI IMPORTAZIONE CSV ---
+  // --- MOTORE DI IMPORTAZIONE CSV (PARSER AVANZATO) ---
   const handleChatImport = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -135,32 +135,71 @@ export default function App() {
 
       try {
         setLoading(true);
-        const lines = text.split('\n');
-        
-        let headerIdx = -1;
-        for (let i = 0; i < 15; i++) {
-          if (lines[i] && lines[i].includes('ID della conversazione')) { headerIdx = i; break; }
-        }
-        if (headerIdx === -1) throw new Error("Intestazioni non trovate nel file CSV. Assicurati che sia il file 'Cronologia'.");
 
-        const parseCSVRow = (row) => {
-          const result = []; let inside = false; let current = '';
-          for (let i = 0; i < row.length; i++) {
-            if (row[i] === '"') inside = !inside;
-            else if (row[i] === ',' && !inside) { result.push(current); current = ''; } 
-            else current += row[i];
+        // Funzione personalizzata che NON va a capo a meno che non sia fuori dalle virgolette
+        const parseCSVAdvanced = (csvText) => {
+          const rows = [];
+          let currentRow = [];
+          let currentCell = '';
+          let inQuotes = false;
+          
+          for (let i = 0; i < csvText.length; i++) {
+            const char = csvText[i];
+            const nextChar = csvText[i + 1];
+            
+            if (inQuotes) {
+              if (char === '"' && nextChar === '"') {
+                currentCell += '"'; i++;
+              } else if (char === '"') {
+                inQuotes = false;
+              } else {
+                currentCell += char;
+              }
+            } else {
+              if (char === '"') {
+                inQuotes = true;
+              } else if (char === ',') {
+                currentRow.push(currentCell.trim());
+                currentCell = '';
+              } else if (char === '\n' || char === '\r') {
+                if (char === '\r' && nextChar === '\n') i++; // salta carriage return
+                currentRow.push(currentCell.trim());
+                if (currentRow.length > 1 || currentRow[0] !== '') {
+                  rows.push(currentRow);
+                }
+                currentRow = [];
+                currentCell = '';
+              } else {
+                currentCell += char;
+              }
+            }
           }
-          result.push(current);
-          return result.map(s => s.trim().replace(/(^"|"$)/g, ''));
+          if (currentRow.length > 0 || currentCell !== '') {
+            currentRow.push(currentCell.trim());
+            rows.push(currentRow);
+          }
+          return rows;
         };
 
-        const headers = parseCSVRow(lines[headerIdx]);
+        const parsedRows = parseCSVAdvanced(text);
+        
+        let headerIdx = -1;
+        for (let i = 0; i < Math.min(15, parsedRows.length); i++) {
+          if (parsedRows[i].some(col => col.includes('ID della conversazione'))) { 
+             headerIdx = i; 
+             break; 
+          }
+        }
+        
+        if (headerIdx === -1) throw new Error("Intestazioni non trovate nel file CSV. Assicurati che sia il file 'Cronologia'.");
+
+        const headers = parsedRows[headerIdx];
         const records = [];
 
-        for (let i = headerIdx + 1; i < lines.length; i++) {
-          if (!lines[i].trim()) continue;
-          const values = parseCSVRow(lines[i]);
-          if (values.length < 10) continue; 
+        // Costruzione delle righe finali
+        for (let i = headerIdx + 1; i < parsedRows.length; i++) {
+          const values = parsedRows[i];
+          if (values.length < 5) continue; 
 
           const getVal = (col) => { const idx = headers.indexOf(col); return idx !== -1 ? values[idx] : null; };
 
@@ -185,10 +224,18 @@ export default function App() {
 
         if (records.length === 0) throw new Error("Nessuna chat valida trovata nel file da importare.");
 
-        const { error } = await supabase.from('zoho_raw_chats').upsert(records, { onConflict: 'chat_id' });
-        if (error) throw error;
+        // Caricamento in blocchi (Chunking) da 1000 righe per evitare sovraccarichi su Supabase
+        const CHUNK_SIZE = 1000;
+        let successCount = 0;
+        
+        for (let i = 0; i < records.length; i += CHUNK_SIZE) {
+            const chunk = records.slice(i, i + CHUNK_SIZE);
+            const { error } = await supabase.from('zoho_raw_chats').upsert(chunk, { onConflict: 'chat_id' });
+            if (error) throw error;
+            successCount += chunk.length;
+        }
 
-        alert(`✅ IMPORTAZIONE COMPLETATA!\n\nSono state caricate e sincronizzate correttamente ${records.length} chat storiche nel database.`);
+        alert(`✅ IMPORTAZIONE COMPLETATA!\n\nSono state caricate e sincronizzate correttamente ${successCount} chat nel database.`);
         fetchAll(); 
 
       } catch (err) {
@@ -487,7 +534,7 @@ Generato automaticamente da Pienissimo.bi`;
                     </div>
                   </div>
                   <label className={`mt-4 md:mt-0 flex items-center gap-2 px-6 py-3 ${loading ? 'bg-slate-700 text-slate-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-500 text-white cursor-pointer shadow-md shadow-blue-900/50'} rounded-xl text-sm font-bold transition-all`}>
-                    <FileText size={16} /> {loading ? 'Elaborazione...' : 'Seleziona CSV'}
+                    <FileText size={16} /> {loading ? 'Elaborazione in corso...' : 'Seleziona CSV'}
                     <input type="file" accept=".csv" className="hidden" onChange={handleChatImport} disabled={loading} />
                   </label>
                 </div>
