@@ -6,7 +6,7 @@ import {
 import { 
   Database, Users, AlertCircle, Code, LayoutDashboard, 
   ChevronLeft, ChevronRight, TrendingUp, TrendingDown, 
-  RefreshCw, X, FileText, ClipboardCheck, Trophy, Target, Clock, Tag, Bug, Zap, CheckCircle2, Copy, UploadCloud
+  RefreshCw, X, FileText, ClipboardCheck, Trophy, Target, Clock, Tag, Bug, Zap, CheckCircle2, Copy, UploadCloud, GraduationCap
 } from 'lucide-react';
 import { 
   format, subWeeks, addWeeks, startOfWeek, endOfWeek, 
@@ -104,11 +104,10 @@ export default function App() {
 
   useEffect(() => { fetchAll(); }, []);
 
-  // AGGIORNATO: Motore di estrazione "Senza Limiti"
+  // Motore di estrazione "Senza Limiti"
   const fetchAll = async () => {
     setLoading(true);
     try {
-      // Funzione che scarica i dati a blocchi di 1000 finché non finiscono
       const fetchPaginated = async (table) => {
         let allRecords = [];
         let from = 0;
@@ -124,7 +123,7 @@ export default function App() {
           
           allRecords = [...allRecords, ...data];
           
-          if (data.length < step) break; // Abbiamo scaricato tutto!
+          if (data.length < step) break; 
           from += step;
         }
         return allRecords;
@@ -146,7 +145,7 @@ export default function App() {
     }
   };
 
-  // --- MOTORE DI IMPORTAZIONE CSV (PARSER AVANZATO) ---
+  // --- MOTORE DI IMPORTAZIONE CSV ---
   const handleChatImport = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -409,7 +408,13 @@ Generato automaticamente da Pienissimo.bi`;
             <h1 className="font-black text-lg tracking-tight">Pienissimo<span className="text-blue-600">.bi</span></h1>
           </div>
           <nav className="space-y-1.5">
-            {[ { id: 'dashboard', icon: LayoutDashboard, label: 'Panoramica' }, { id: 'chat', icon: Users, label: 'Reparto Chat' }, { id: 'assistenza', icon: AlertCircle, label: 'Assistenza' }, { id: 'sviluppo', icon: Code, label: 'Sviluppo' } ].map(item => (
+            {[ 
+              { id: 'dashboard', icon: LayoutDashboard, label: 'Panoramica' }, 
+              { id: 'chat', icon: Users, label: 'Reparto Chat' }, 
+              { id: 'assistenza', icon: AlertCircle, label: 'Assistenza' }, 
+              { id: 'sviluppo', icon: Code, label: 'Sviluppo' },
+              { id: 'formazione', icon: GraduationCap, label: 'Formazione' } 
+            ].map(item => (
               <button key={item.id} onClick={() => setView(item.id)} className={`flex items-center gap-3 w-full px-4 py-3 rounded-xl transition-all font-bold text-sm ${view === item.id ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900'}`}>
                 <item.icon size={18} className={view === item.id ? 'text-white' : 'text-slate-400'} /> {item.label}
               </button>
@@ -637,7 +642,19 @@ Generato automaticamente da Pienissimo.bi`;
                 </div>
               </div>
             )}
-            
+
+            {/* DETTAGLIO: FORMAZIONE */}
+            {view === 'formazione' && (
+              <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
+                <SectionTitle icon={GraduationCap} title="Reparto Formazione" colorClass="text-purple-600" bgClass="bg-purple-100" />
+                <div className="flex flex-col items-center justify-center h-96 bg-white rounded-3xl border border-slate-200 shadow-sm border-dashed">
+                  <GraduationCap size={48} className="text-slate-200 mb-4" />
+                  <h2 className="text-xl font-bold text-slate-800">Bentornata Sezione Formazione!</h2>
+                  <p className="text-slate-500 mt-2 text-sm text-center max-w-md">La voce è stata ripristinata nel menu. Vuoi che ricolleghiamo i dati che c'erano prima o che creiamo dei nuovi widget e grafici da zero?</p>
+                </div>
+              </div>
+            )}
+
           </div>
         </main>
       </div>
