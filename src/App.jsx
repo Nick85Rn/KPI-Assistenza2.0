@@ -6,7 +6,7 @@ import {
 import { 
   Database, Users, AlertCircle, Code, LayoutDashboard, 
   ChevronLeft, ChevronRight, TrendingUp, TrendingDown, 
-  RefreshCw, X, FileText, ClipboardCheck, Trophy, Target, Clock, Tag, Bug, Zap, CheckCircle2, Copy
+  RefreshCw, X, FileText, ClipboardCheck, Trophy, Target, Clock, Tag, Bug, Zap, CheckCircle2, Copy, UploadCloud
 } from 'lucide-react';
 import { 
   format, subWeeks, addWeeks, startOfWeek, endOfWeek, 
@@ -113,6 +113,100 @@ export default function App() {
       setData({ chat: c.data||[], ast: a.data||[], dev: d.data||[] });
       setLastUpdated(new Date());
     } catch (err) { console.error(err); } finally { setLoading(false); }
+  };
+
+  // --- MOTORE DI IMPORTAZIONE CSV (PARSER INTELLIGENTE) ---
+  const handleChatImport = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      const text = evt.target.result;
+      
+      // Controlli di sicurezza
+      if (text.includes("Brand Performance") || text.includes("Website Traffic")) {
+        alert("🛑 ALT! Hai caricato il 'Brand Report'. Usa il file Cronologia!"); e.target.value = ''; return;
+      }
+      if (text.includes("Operator Name") || text.includes("Chats Owned")) {
+        alert("🛑 ALT! Hai caricato il report 'Prestazioni Operatori'. Usa il file Cronologia!"); e.target.value = ''; return;
+      }
+
+      try {
+        setLoading(true);
+        const lines = text.split('\n');
+        
+        // Cerca la riga di intestazione (header)
+        let headerIdx = -1;
+        for (let i = 0; i < 15; i++) {
+          if (lines[i] && lines[i].includes('ID della conversazione')) { headerIdx = i; break; }
+        }
+        if (headerIdx === -1) throw new Error("Intestazioni non trovate nel file CSV. Assicurati che sia il file 'Cronologia'.");
+
+        // Funzione per splittare le righe CSV ignorando le virgole dentro le virgolette
+        const parseCSVRow = (row) => {
+          const result = []; let inside = false; let current = '';
+          for (let i = 0; i < row.length; i++) {
+            if (row[i] === '"') inside = !inside;
+            else if (row[i] === ',' && !inside) { result.push(current); current = ''; } 
+            else current += row[i];
+          }
+          result.push(current);
+          return result.map(s => s.trim().replace(/(^"|"$)/g, ''));
+        };
+
+        const headers = parseCSVRow(lines[headerIdx]);
+        const records = [];
+
+        // Parsing delle righe
+        for (let i = headerIdx + 1; i < lines.length; i++) {
+          if (!lines[i].trim()) continue;
+          const values = parseCSVRow(lines[i]);
+          if (values.length < 10) continue; // Salta righe vuote o corrotte
+
+          const getVal = (col) => {
+            const idx = headers.indexOf(col);
+            return idx !== -1 ? values[idx] : null;
+          };
+
+          const chatId = getVal('ID della conversazione');
+          if (!chatId) continue;
+
+          // Conversione magica dai millisecondi (Epoch) a Date reali ISO per Supabase
+          const createdMs = Number(getVal('Ora di creazione (in millisecondi)'));
+          const closedMs = Number(getVal('Ora di fine (in millisecondi)'));
+
+          records.push({
+            chat_id: chatId,
+            operator: getVal('Partecipante') || 'Bot / Non Assegnato',
+            department: getVal('Dipartimento'),
+            created_time: createdMs ? new Date(createdMs).toISOString() : null,
+            closed_time: closedMs ? new Date(closedMs).toISOString() : null,
+            waiting_time_seconds: Number(getVal('Risposta da parte del primo agente dopo (in secondi)')) || 0,
+            duration_seconds: Number(getVal('Durata della chat (in secondi)')) || 0,
+            visitor_email: getVal('Indirizzo e-mail'),
+            question: getVal('Domanda')
+          });
+        }
+
+        if (records.length === 0) throw new Error("Nessuna chat valida trovata nel file da importare.");
+
+        // Caricamento nel database con Upsert (aggiorna se esiste già l'ID)
+        const { error } = await supabase.from('zoho_raw_chats').upsert(records, { onConflict: 'chat_id' });
+        if (error) throw error;
+
+        alert(`✅ IMPORTAZIONE COMPLETATA!\n\nSono state caricate e sincronizzate correttamente ${records.length} chat storiche nel database.`);
+        fetchAll(); // Aggiorna immediatamente la dashboard!
+
+      } catch (err) {
+        console.error(err);
+        alert("❌ Errore durante l'elaborazione del file: " + err.message);
+      } finally {
+        setLoading(false);
+        e.target.value = ''; // Resetta l'input file
+      }
+    };
+    reader.readAsText(file);
   };
 
   const periods = useMemo(() => {
@@ -362,6 +456,24 @@ Generato automaticamente da Pienissimo.bi`;
             {view === 'chat' && (
               <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
                 <SectionTitle icon={Users} title="Analisi Dettagliata Reparto Chat" colorClass="text-blue-600" bgClass="bg-blue-100" />
+                
+                {/* WIDGET IMPORTAZIONE MANUALE CON PARSER INTEGRATO */}
+                <div className="bg-slate-900 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between shadow-lg mb-6 border border-slate-800">
+                  <div className="flex items-center gap-4">
+                    <div className="bg-blue-500/20 p-3 rounded-xl">
+                      {loading ? <RefreshCw size={24} className="text-blue-400 animate-spin"/> : <UploadCloud size={24} className="text-blue-400"/>}
+                    </div>
+                    <div>
+                      <h3 className="text-white font-bold text-sm md:text-base">Carica Storico Chat</h3>
+                      <p className="text-slate-400 text-xs mt-1">Carica il file CSV "Cronologia" esportato da Zoho. I dati verranno inviati al database in tempo reale.</p>
+                    </div>
+                  </div>
+                  <label className={`mt-4 md:mt-0 flex items-center gap-2 px-6 py-3 ${loading ? 'bg-slate-700 text-slate-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-500 text-white cursor-pointer shadow-md shadow-blue-900/50'} rounded-xl text-sm font-bold transition-all`}>
+                    <FileText size={16} /> {loading ? 'Elaborazione...' : 'Seleziona CSV'}
+                    <input type="file" accept=".csv" className="hidden" onChange={handleChatImport} disabled={loading} />
+                  </label>
+                </div>
+
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   <div className="lg:col-span-2">
                     <ChartContainer title="Trend Volumi Giornalieri" isEmpty={trends.every(t => t.chatVol === 0)}>
