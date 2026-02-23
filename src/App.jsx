@@ -1,12 +1,13 @@
 /* eslint-disable */
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  PieChart, Pie, Cell
 } from 'recharts';
 import { 
   Database, Users, AlertCircle, Code, LayoutDashboard, 
   ChevronLeft, ChevronRight, TrendingUp, TrendingDown, 
-  RefreshCw, X, FileText, ClipboardCheck, Trophy, Target, Clock, Tag, Bug, Zap, CheckCircle2, Copy, UploadCloud, GraduationCap
+  RefreshCw, X, FileText, ClipboardCheck, Trophy, Target, Clock, Tag, Bug, Zap, CheckCircle2, Copy, UploadCloud, GraduationCap, Timer
 } from 'lucide-react';
 import { 
   format, subWeeks, addWeeks, startOfWeek, endOfWeek, 
@@ -15,6 +16,8 @@ import {
 } from 'date-fns';
 import { it } from 'date-fns/locale'; 
 import { supabase } from './supabaseClient';
+
+const COLORS = ['#8b5cf6', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6', '#64748b'];
 
 // --- FORMATTERS ---
 const formatNumber = (num) => { if (!num || isNaN(num)) return 0; return Math.ceil(num).toLocaleString('it-IT'); };
@@ -95,7 +98,7 @@ const ChartContainer = ({ title, children, isEmpty, height = 320 }) => (
 export default function App() {
   const [view, setView] = useState('dashboard');
   const [timeframe, setTimeframe] = useState('week'); // 'week' | 'month'
-  const [data, setData] = useState({ chat: [], ast: [], dev: [] });
+  const [data, setData] = useState({ chat: [], ast: [], dev: [], form: [] });
   const [loading, setLoading] = useState(false);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [generatedReport, setGeneratedReport] = useState(null);
@@ -104,38 +107,37 @@ export default function App() {
 
   useEffect(() => { fetchAll(); }, []);
 
-  // Motore di estrazione "Senza Limiti"
+  // Motore di estrazione "Senza Limiti" da Supabase
   const fetchAll = async () => {
     setLoading(true);
     try {
       const fetchPaginated = async (table) => {
-        let allRecords = [];
-        let from = 0;
-        const step = 1000;
-        
-        while (true) {
-          const { data, error } = await supabase
-            .from(table)
-            .select('*')
-            .range(from, from + step - 1);
-            
-          if (error) throw error;
-          
-          allRecords = [...allRecords, ...data];
-          
-          if (data.length < step) break; 
-          from += step;
+        try {
+          let allRecords = [];
+          let from = 0;
+          const step = 1000;
+          while (true) {
+            const { data, error } = await supabase.from(table).select('*').range(from, from + step - 1);
+            if (error) throw error;
+            allRecords = [...allRecords, ...data];
+            if (data.length < step) break; 
+            from += step;
+          }
+          return allRecords;
+        } catch (e) {
+          console.warn(`Tabella ${table} non trovata o vuota:`, e.message);
+          return [];
         }
-        return allRecords;
       };
 
-      const [c, a, d] = await Promise.all([
+      const [c, a, d, f] = await Promise.all([
         fetchPaginated('zoho_raw_chats'),
         fetchPaginated('zoho_raw_assistenza'),
-        fetchPaginated('zoho_raw_sviluppo')
+        fetchPaginated('zoho_raw_sviluppo'),
+        fetchPaginated('zoho_raw_formazione')
       ]);
 
-      setData({ chat: c, ast: a, dev: d });
+      setData({ chat: c, ast: a, dev: d, form: f });
       setLastUpdated(new Date());
     } catch (err) { 
       console.error(err); 
@@ -145,131 +147,149 @@ export default function App() {
     }
   };
 
-  // --- MOTORE DI IMPORTAZIONE CSV ---
-  const handleChatImport = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    
+  // --- PARSER CSV AVANZATO (Universale) ---
+  const parseCSVAdvanced = (csvText) => {
+    const rows = []; let currentRow = []; let currentCell = ''; let inQuotes = false;
+    for (let i = 0; i < csvText.length; i++) {
+      const char = csvText[i]; const nextChar = csvText[i + 1];
+      if (inQuotes) {
+        if (char === '"' && nextChar === '"') { currentCell += '"'; i++; } 
+        else if (char === '"') { inQuotes = false; } 
+        else { currentCell += char; }
+      } else {
+        if (char === '"') { inQuotes = true; } 
+        else if (char === ',') { currentRow.push(currentCell.trim()); currentCell = ''; } 
+        else if (char === '\n' || char === '\r') {
+          if (char === '\r' && nextChar === '\n') i++; 
+          currentRow.push(currentCell.trim());
+          if (currentRow.length > 1 || currentRow[0] !== '') { rows.push(currentRow); }
+          currentRow = []; currentCell = '';
+        } else { currentCell += char; }
+      }
+    }
+    if (currentRow.length > 0 || currentCell !== '') { currentRow.push(currentCell.trim()); rows.push(currentRow); }
+    return rows;
+  };
+
+  // --- IMPORT CHAT ---
+  const handleChatImport = async (e) => {
+    const file = e.target.files[0]; if (!file) return;
     const reader = new FileReader();
     reader.onload = async (evt) => {
       const text = evt.target.result;
-      
-      if (text.includes("Brand Performance") || text.includes("Website Traffic")) {
-        alert("🛑 ALT! Hai caricato il 'Brand Report'. Usa il file Cronologia!"); e.target.value = ''; return;
+      if (text.includes("Brand Performance") || text.includes("Chats Owned")) {
+        alert("🛑 ALT! File errato. Usa il file 'Cronologia' delle chat!"); e.target.value = ''; return;
       }
-      if (text.includes("Operator Name") || text.includes("Chats Owned")) {
-        alert("🛑 ALT! Hai caricato il report 'Prestazioni Operatori'. Usa il file Cronologia!"); e.target.value = ''; return;
-      }
-
       try {
         setLoading(true);
+        const parsedRows = parseCSVAdvanced(text);
+        let headerIdx = -1;
+        for (let i = 0; i < Math.min(15, parsedRows.length); i++) {
+          if (parsedRows[i].some(col => col.includes('ID della conversazione'))) { headerIdx = i; break; }
+        }
+        if (headerIdx === -1) throw new Error("Intestazioni non trovate.");
+        const headers = parsedRows[headerIdx]; const records = [];
+        for (let i = headerIdx + 1; i < parsedRows.length; i++) {
+          const values = parsedRows[i]; if (values.length < 5) continue; 
+          const getVal = (col) => { const idx = headers.indexOf(col); return idx !== -1 ? values[idx] : null; };
+          const chatId = getVal('ID della conversazione'); if (!chatId) continue;
+          records.push({
+            chat_id: chatId, operator: getVal('Partecipante') || 'Bot',
+            created_time: getVal('Ora di creazione (in millisecondi)') ? new Date(Number(getVal('Ora di creazione (in millisecondi)'))).toISOString() : null,
+            closed_time: getVal('Ora di fine (in millisecondi)') ? new Date(Number(getVal('Ora di fine (in millisecondi)'))).toISOString() : null,
+            waiting_time_seconds: Number(getVal('Risposta da parte del primo agente dopo (in secondi)')) || 0
+          });
+        }
+        for (let i = 0; i < records.length; i += 1000) {
+            const chunk = records.slice(i, i + 1000);
+            await supabase.from('zoho_raw_chats').upsert(chunk, { onConflict: 'chat_id' });
+        }
+        alert("✅ Chat importate con successo!"); fetchAll(); 
+      } catch (err) { alert("❌ Errore: " + err.message); } finally { setLoading(false); e.target.value = ''; }
+    };
+    reader.readAsText(file);
+  };
 
-        const parseCSVAdvanced = (csvText) => {
-          const rows = [];
-          let currentRow = [];
-          let currentCell = '';
-          let inQuotes = false;
-          
-          for (let i = 0; i < csvText.length; i++) {
-            const char = csvText[i];
-            const nextChar = csvText[i + 1];
-            
-            if (inQuotes) {
-              if (char === '"' && nextChar === '"') {
-                currentCell += '"'; i++; 
-              } else if (char === '"') {
-                inQuotes = false;
-              } else {
-                currentCell += char;
-              }
-            } else {
-              if (char === '"') {
-                inQuotes = true;
-              } else if (char === ',') {
-                currentRow.push(currentCell.trim()); 
-                currentCell = '';
-              } else if (char === '\n' || char === '\r') {
-                if (char === '\r' && nextChar === '\n') i++; 
-                currentRow.push(currentCell.trim());
-                if (currentRow.length > 1 || currentRow[0] !== '') {
-                  rows.push(currentRow);
-                }
-                currentRow = [];
-                currentCell = '';
-              } else {
-                currentCell += char;
-              }
-            }
-          }
-          if (currentRow.length > 0 || currentCell !== '') {
-            currentRow.push(currentCell.trim());
-            rows.push(currentRow);
-          }
-          return rows;
-        };
-
+  // --- IMPORT FORMAZIONE CON INTELLIGENZA ARTIFICIALE ---
+  const handleFormazioneImport = async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      const text = evt.target.result;
+      try {
+        setLoading(true);
         const parsedRows = parseCSVAdvanced(text);
         
         let headerIdx = -1;
-        for (let i = 0; i < Math.min(15, parsedRows.length); i++) {
-          if (parsedRows[i].some(col => col.includes('ID della conversazione'))) { 
-             headerIdx = i; 
-             break; 
-          }
+        for (let i = 0; i < Math.min(10, parsedRows.length); i++) {
+          if (parsedRows[i].some(col => col.includes('Durata Formazione'))) { headerIdx = i; break; }
         }
-        
-        if (headerIdx === -1) throw new Error("Intestazioni non trovate nel file CSV. Assicurati che sia il file 'Cronologia'.");
+        if (headerIdx === -1) throw new Error("Intestazioni non trovate. Assicurati che sia il 'Report Assistenza Tecnica_per operatore.csv'.");
 
         const headers = parsedRows[headerIdx];
         const records = [];
 
+        // Traduttore Date in Italiano a ISO
+        const parseItalianDate = (dateStr) => {
+          if (!dateStr) return null;
+          const months = { 'gen': 0, 'feb': 1, 'mar': 2, 'apr': 3, 'mag': 4, 'giu': 5, 'lug': 6, 'ago': 7, 'set': 8, 'ott': 9, 'nov': 10, 'dic': 11 };
+          const match = dateStr.match(/([a-z]{3})\s+(\d{1,2}),\s+(\d{4})\s+(\d{1,2}):(\d{2})/i);
+          if (match) {
+            const [, month, day, year, hour, minute] = match;
+            const m = months[month.toLowerCase()];
+            if (m !== undefined) return new Date(year, m, day, hour, minute).toISOString();
+          }
+          return null;
+        };
+
+        // Algoritmo di Classificazione Argomento
+        const classifyTopic = (title, desc) => {
+          const t = (title + " " + desc).toLowerCase();
+          if (t.includes('voice pro') || t.includes('centralino')) return 'Centralino / Voice Pro';
+          if (t.includes('api') || t.includes('whatsapp') || t.includes('wa')) return 'WhatsApp API';
+          if (t.includes('app clienti') || t.includes('app lite') || t.includes('build')) return 'App Clienti';
+          if (t.includes('magazzino')) return 'Gestione Magazzino';
+          if (t.includes('fidelity') || t.includes('marketing') || t.includes('template') || t.includes('portfolio')) return 'Marketing & Fidelity';
+          if (t.includes('bug') || t.includes('lavori') || t.includes('assistenza')) return 'Assistenza Pura';
+          return 'Formazione Generale';
+        };
+
         for (let i = headerIdx + 1; i < parsedRows.length; i++) {
-          const values = parsedRows[i];
-          if (values.length < 5) continue; 
+          const values = parsedRows[i]; if (values.length < 5) continue; 
+          const getVal = (col) => { const idx = headers.findIndex(h => h.includes(col)); return idx !== -1 ? values[idx] : ''; };
 
-          const getVal = (col) => { const idx = headers.indexOf(col); return idx !== -1 ? values[idx] : null; };
-
-          const chatId = getVal('ID della conversazione');
-          if (!chatId) continue;
-
-          const createdMs = Number(getVal('Ora di creazione (in millisecondi)'));
-          const closedMs = Number(getVal('Ora di fine (in millisecondi)'));
+          const title = getVal('Nome Nota Reparto Tecnico');
+          const company = getVal('Azienda');
+          const creator = getVal('Creato da') || getVal('Proprietario di Nota Reparto Tecnico');
+          const desc = getVal('Descrizione');
+          const duration = parseInt(getVal('Durata Formazione (in minuti)'), 10) || 0;
+          const createdAt = getVal('Ora creazione');
+          
+          if (!title && !company) continue;
 
           records.push({
-            chat_id: chatId,
-            operator: getVal('Partecipante') || 'Bot / Non Assegnato',
-            department: getVal('Dipartimento'),
-            created_time: createdMs ? new Date(createdMs).toISOString() : null,
-            closed_time: closedMs ? new Date(closedMs).toISOString() : null,
-            waiting_time_seconds: Number(getVal('Risposta da parte del primo agente dopo (in secondi)')) || 0,
-            duration_seconds: Number(getVal('Durata della chat (in secondi)')) || 0,
-            visitor_email: getVal('Indirizzo e-mail'),
-            question: getVal('Domanda')
+            topic: classifyTopic(title, desc),
+            original_title: title,
+            company: company,
+            operator: creator,
+            description: desc,
+            duration_minutes: duration,
+            created_time: parseItalianDate(createdAt) || new Date().toISOString()
           });
         }
 
-        if (records.length === 0) throw new Error("Nessuna chat valida trovata nel file da importare.");
+        if (records.length === 0) throw new Error("Nessuna riga valida trovata.");
 
-        const CHUNK_SIZE = 1000;
-        let successCount = 0;
-        
-        for (let i = 0; i < records.length; i += CHUNK_SIZE) {
-            const chunk = records.slice(i, i + CHUNK_SIZE);
-            const { error } = await supabase.from('zoho_raw_chats').upsert(chunk, { onConflict: 'chat_id' });
-            if (error) throw error;
-            successCount += chunk.length;
+        // Inserimento brutale (attenzione ai doppioni se si ricarica lo stesso file)
+        for (let i = 0; i < records.length; i += 500) {
+            const chunk = records.slice(i, i + 500);
+            await supabase.from('zoho_raw_formazione').insert(chunk);
         }
 
-        alert(`✅ IMPORTAZIONE COMPLETATA!\n\nSono state caricate e sincronizzate correttamente ${successCount} chat nel database.`);
+        alert(`✅ IMPORTAZIONE COMPLETATA!\n\nSono state classificate ed elaborate ${records.length} sessioni di formazione.`);
         fetchAll(); 
 
-      } catch (err) {
-        console.error(err);
-        alert("❌ Errore durante l'elaborazione del file: " + err.message);
-      } finally {
-        setLoading(false);
-        e.target.value = ''; 
-      }
+      } catch (err) { alert("❌ Errore Formazione: " + err.message); } finally { setLoading(false); e.target.value = ''; }
     };
     reader.readAsText(file);
   };
@@ -281,35 +301,85 @@ export default function App() {
     if (timeframe === 'week') {
       const s = startOfWeek(currentDate, { weekStartsOn: 1 });
       const e = endOfWeek(currentDate, { weekStartsOn: 1 });
-      const label = `Sett. ${getISOWeek(currentDate)} (${format(s, 'dd MMM', {locale: it})} - ${format(e, 'dd MMM', {locale: it})})`;
-      return { curr: { start: s, end: e, label }, prev: { start: subWeeks(s, 1), end: subWeeks(e, 1) } };
+      return { curr: { start: s, end: e, label: `Sett. ${getISOWeek(currentDate)} (${format(s, 'dd MMM', {locale: it})} - ${format(e, 'dd MMM', {locale: it})})` }, prev: { start: subWeeks(s, 1), end: subWeeks(e, 1) } };
     } else {
       const s = startOfMonth(currentDate);
       const e = endOfMonth(currentDate);
-      const label = format(currentDate, 'MMMM yyyy', {locale: it}).toUpperCase();
-      return { curr: { start: s, end: e, label }, prev: { start: subMonths(s, 1), end: subMonths(e, 1) } };
+      return { curr: { start: s, end: e, label: format(currentDate, 'MMMM yyyy', {locale: it}).toUpperCase() }, prev: { start: subMonths(s, 1), end: subMonths(e, 1) } };
     }
   }, [currentDate, timeframe]);
 
-  // --- KPI & INSIGHTS ENGINE ---
+  // --- KPI ENGINE ---
   const kpi = useMemo(() => {
     const calc = (start, end) => {
       const chats = data.chat.filter(x => safeInRange(x.created_time, start, end));
-      const respChat = chats.length > 0 ? chats.reduce((a,b) => a + (Number(b.waiting_time_seconds)||0), 0) / chats.length : 0;
-
-      const astIn = data.ast.filter(x => safeInRange(x.created_time, start, end));
       const astOut = data.ast.filter(x => safeInRange(x.closed_time, start, end));
-      const slaAst = astOut.length > 0 ? astOut.reduce((a,x) => a + diffInMinutes(x.closed_time, x.created_time), 0) / astOut.length : 0;
-
-      const devIn = data.dev.filter(x => safeInRange(x.created_time, start, end));
       const devOut = data.dev.filter(x => safeInRange(x.closed_time, start, end));
-      const slaDev = devOut.length > 0 ? devOut.reduce((a,x) => a + diffInMinutes(x.closed_time, x.created_time), 0) / devOut.length : 0;
-      const backlog = data.dev.filter(x => !x.status?.toLowerCase().includes('chius') && !x.status?.toLowerCase().includes('clos')).length;
+      const forms = data.form.filter(x => safeInRange(x.created_time, start, end));
 
-      return { chatVol: chats.length, chatWait: respChat, astIn: astIn.length, astOut: astOut.length, slaAst, devIn: devIn.length, devOut: devOut.length, slaDev, backlog };
+      return { 
+        chatVol: chats.length, 
+        chatWait: chats.length > 0 ? chats.reduce((a,b) => a + (Number(b.waiting_time_seconds)||0), 0) / chats.length : 0, 
+        astIn: data.ast.filter(x => safeInRange(x.created_time, start, end)).length, 
+        astOut: astOut.length, 
+        slaAst: astOut.length > 0 ? astOut.reduce((a,x) => a + diffInMinutes(x.closed_time, x.created_time), 0) / astOut.length : 0, 
+        backlog: data.dev.filter(x => !x.status?.toLowerCase().includes('chius')).length,
+        devOut: devOut.length,
+        formCount: forms.length,
+        formMins: forms.reduce((a,b) => a + (Number(b.duration_minutes)||0), 0)
+      };
     };
     return { curr: calc(periods.curr.start, periods.curr.end), prev: calc(periods.prev.start, periods.prev.end) };
   }, [data, periods]);
+
+  const insightsFormazione = useMemo(() => {
+    const forms = data.form.filter(x => safeInRange(x.created_time, periods.curr.start, periods.curr.end));
+    
+    const opsMap = {};
+    const topicMap = {};
+    
+    forms.forEach(f => {
+      const op = f.operator || 'Sconosciuto';
+      const t = f.topic || 'Generale';
+      const dur = Number(f.duration_minutes) || 0;
+
+      if (!opsMap[op]) opsMap[op] = { name: op, count: 0, mins: 0 };
+      opsMap[op].count++; opsMap[op].mins += dur;
+
+      if (!topicMap[t]) topicMap[t] = { name: t, count: 0, mins: 0 };
+      topicMap[t].count++; topicMap[t].mins += dur;
+    });
+
+    return {
+      topOps: Object.values(opsMap).sort((a,b) => b.mins - a.mins),
+      topTopics: Object.values(topicMap).sort((a,b) => b.count - a.count)
+    };
+  }, [data.form, periods.curr]);
+
+  const insights = useMemo(() => {
+    // Top Chat
+    const chats = data.chat.filter(x => safeInRange(x.created_time, periods.curr.start, periods.curr.end));
+    const opsMap = {};
+    chats.forEach(c => {
+       const op = c.operator || 'Non Assegnato';
+       if(!opsMap[op]) opsMap[op] = { name: op, count: 0, waitSum: 0 };
+       opsMap[op].count++; opsMap[op].waitSum += (Number(c.waiting_time_seconds)||0);
+    });
+    const allOps = Object.values(opsMap).map(o => ({ name: o.name, count: o.count, avgWait: o.count > 0 ? o.waitSum / o.count : 0 })).sort((a,b) => b.count - a.count);
+
+    // Top Ast
+    const ast = data.ast.filter(x => safeInRange(x.created_time, periods.curr.start, periods.curr.end));
+    const astCatMap = {}; ast.forEach(t => { const c = t.category || 'Generale'; astCatMap[c] = (astCatMap[c]||0) + 1; });
+    
+    // Top Dev
+    const devCatsMap = {}; data.dev.filter(x => !x.status?.toLowerCase().includes('chius')).forEach(t => { const c = t.category || 'Generale'; devCatsMap[c] = (devCatsMap[c]||0) + 1; });
+
+    return { 
+      allOps, topOps: allOps.slice(0, 4), 
+      allAstCats: Object.entries(astCatMap).map(([name, count]) => ({name, count})).sort((a,b) => b.count - a.count), 
+      allDevCats: Object.entries(devCatsMap).map(([name, count]) => ({name, count})).sort((a,b) => b.count - a.count) 
+    };
+  }, [data, periods.curr]);
 
   const trends = useMemo(() => {
     return eachDayOfInterval({ start: periods.curr.start, end: periods.curr.end }).map(day => {
@@ -325,29 +395,6 @@ export default function App() {
       };
     });
   }, [data, periods.curr, timeframe]);
-
-  const insights = useMemo(() => {
-    const chats = data.chat.filter(x => safeInRange(x.created_time, periods.curr.start, periods.curr.end));
-    const opsMap = {};
-    chats.forEach(c => {
-       const op = c.operator || 'Non Assegnato';
-       if(!opsMap[op]) opsMap[op] = { name: op, count: 0, waitSum: 0 };
-       opsMap[op].count++;
-       opsMap[op].waitSum += (Number(c.waiting_time_seconds)||0);
-    });
-    const allOps = Object.values(opsMap).map(o => ({
-       name: o.name, count: o.count, avgWait: o.count > 0 ? o.waitSum / o.count : 0
-    })).sort((a,b) => b.count - a.count);
-
-    const ast = data.ast.filter(x => safeInRange(x.created_time, periods.curr.start, periods.curr.end));
-    const astCatMap = {}; ast.forEach(t => { const c = t.category || 'Generale'; astCatMap[c] = (astCatMap[c]||0) + 1; });
-    const allAstCats = Object.entries(astCatMap).map(([name, count]) => ({name, count})).sort((a,b) => b.count - a.count);
-
-    const devCatsMap = {}; data.dev.filter(x => !x.status?.toLowerCase().includes('chius')).forEach(t => { const c = t.category || 'Generale'; devCatsMap[c] = (devCatsMap[c]||0) + 1; });
-    const allDevCats = Object.entries(devCatsMap).map(([name, count]) => ({name, count})).sort((a,b) => b.count - a.count);
-
-    return { allOps, topOps: allOps.slice(0, 4), allAstCats, topAstCats: allAstCats.slice(0, 4), allDevCats, topDevCats: allDevCats.slice(0, 4) };
-  }, [data, periods.curr]);
 
   const handleGenerateReport = () => {
     const c = kpi.curr; const p = kpi.prev;
@@ -368,23 +415,23 @@ export default function App() {
 🗓️ Periodo: ${periods.curr.label}
 
 📝 SINTESI GENERALE:
-${periodName} il team ha gestito un totale di ${c.chatVol} conversazioni, garantendo un tempo di attesa medio di ${formatSeconds(c.chatWait)} per i nostri clienti. ${insights.topOps.length > 0 ? `Ottimo lavoro per ${insights.topOps[0].name} con ${insights.topOps[0].count} chat prese in carico.` : ''}
-Sul fronte tecnico, il reparto Assistenza ha ricevuto ${c.astIn} nuovi ticket, riuscendo a chiuderne ${c.astOut} mantenendo uno SLA medio di ${formatTime(c.slaAst)}. 
-Contemporaneamente, il team di Sviluppo ha lavorato sul debito tecnico correggendo ${c.devOut} bug, portando il backlog attivo a ${c.backlog} task totali.
+${periodName} il team ha gestito ${c.chatVol} chat (attesa media ${formatSeconds(c.chatWait)}) ed erogato ${c.formCount} sessioni di formazione ai clienti per un totale di ${formatTime(c.formMins)}.
+L'Assistenza ha ricevuto ${c.astIn} nuovi ticket, chiudendone ${c.astOut} (SLA: ${formatTime(c.slaAst)}). 
+Il team Sviluppo ha corretto ${c.devOut} bug (Backlog attivo: ${c.backlog}).
 
 ⚡ INDICATORI CHIAVE E TREND (VS ${periodLabelPrec.toUpperCase()}):
 
 💬 REPARTO CHAT
 • Volumi Gestiti: ${c.chatVol} (${formatTrend(c.chatVol, p.chatVol, null)})
-• Tempo Attesa Medio: ${formatSeconds(c.chatWait)} (${formatTrend(c.chatWait, p.chatWait, formatSeconds, true)})
+• Tempo Attesa: ${formatSeconds(c.chatWait)} (${formatTrend(c.chatWait, p.chatWait, formatSeconds, true)})
+
+🎓 FORMAZIONE
+• Sessioni: ${c.formCount} (${formatTrend(c.formCount, p.formCount, null)})
+• Ore Totali: ${formatTime(c.formMins)} (${formatTrend(c.formMins, p.formMins, formatTime)})
 
 🛠️ SUPPORTO TECNICO
 • Ticket Chiusi: ${c.astOut} (${formatTrend(c.astOut, p.astOut, null)})
-• SLA di Risoluzione: ${formatTime(c.slaAst)} (${formatTrend(c.slaAst, p.slaAst, formatTime, true)})
-
-💻 SVILUPPO E BUG FIXING
-• Bug Risolti: ${c.devOut} (${formatTrend(c.devOut, p.devOut, null)})
-• Backlog Attivo: ${c.backlog} (${formatTrend(c.backlog, p.backlog, null, true)})
+• SLA Risoluzione: ${formatTime(c.slaAst)} (${formatTrend(c.slaAst, p.slaAst, formatTime, true)})
 -----------------------------------------
 Generato automaticamente da Pienissimo.bi`;
 
@@ -411,9 +458,9 @@ Generato automaticamente da Pienissimo.bi`;
             {[ 
               { id: 'dashboard', icon: LayoutDashboard, label: 'Panoramica' }, 
               { id: 'chat', icon: Users, label: 'Reparto Chat' }, 
+              { id: 'formazione', icon: GraduationCap, label: 'Formazione' },
               { id: 'assistenza', icon: AlertCircle, label: 'Assistenza' }, 
-              { id: 'sviluppo', icon: Code, label: 'Sviluppo' },
-              { id: 'formazione', icon: GraduationCap, label: 'Formazione' } 
+              { id: 'sviluppo', icon: Code, label: 'Sviluppo' }
             ].map(item => (
               <button key={item.id} onClick={() => setView(item.id)} className={`flex items-center gap-3 w-full px-4 py-3 rounded-xl transition-all font-bold text-sm ${view === item.id ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900'}`}>
                 <item.icon size={18} className={view === item.id ? 'text-white' : 'text-slate-400'} /> {item.label}
@@ -475,14 +522,14 @@ Generato automaticamente da Pienissimo.bi`;
               <div className="space-y-10">
                 {/* Reparto Chat */}
                 <section>
-                  <SectionTitle icon={Users} title="Performance Chat & Team" colorClass="text-blue-600" bgClass="bg-blue-100" />
+                  <SectionTitle icon={Users} title="Performance Chat" colorClass="text-blue-600" bgClass="bg-blue-100" />
                   <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
                     <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
                       <KPICard label="Chat Gestite" current={kpi.curr.chatVol} previous={kpi.prev.chatVol} icon={Target} colorClass="text-blue-500" />
                       <KPICard label="Attesa Media" current={kpi.curr.chatWait} previous={kpi.prev.chatWait} type="seconds" invert icon={Clock} colorClass="text-blue-500" />
                     </div>
-                    <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm p-5 flex flex-col cursor-pointer hover:border-blue-200 transition-all" onClick={() => setView('chat')}>
-                      <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2"><Trophy size={14} className="text-amber-500"/> Top Operatori (Tempi e Volumi)</h3>
+                    <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm p-5 flex flex-col cursor-pointer hover:border-blue-200" onClick={() => setView('chat')}>
+                      <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2"><Trophy size={14} className="text-amber-500"/> Top Operatori (Chat)</h3>
                       <div className="flex-1 space-y-3">
                         {insights.topOps.length === 0 ? <p className="text-xs text-slate-400">Nessun dato</p> : 
                           insights.topOps.map((op, i) => (
@@ -492,7 +539,31 @@ Generato automaticamente da Pienissimo.bi`;
                             </div>
                           ))}
                       </div>
-                      <div className="mt-3 text-center text-[10px] font-bold text-blue-500 uppercase tracking-wider">Vedi Leaderboard Completa &rarr;</div>
+                      <div className="mt-3 text-center text-[10px] font-bold text-blue-500 uppercase tracking-wider">Vedi Leaderboard &rarr;</div>
+                    </div>
+                  </div>
+                </section>
+
+                {/* Formazione (Aggiunta) */}
+                <section>
+                  <SectionTitle icon={GraduationCap} title="Formazione Clienti" colorClass="text-purple-600" bgClass="bg-purple-100" />
+                  <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+                    <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <KPICard label="Sessioni Erogate" current={kpi.curr.formCount} previous={kpi.prev.formCount} icon={GraduationCap} colorClass="text-purple-500" />
+                      <KPICard label="Ore Totali" current={kpi.curr.formMins} previous={kpi.prev.formMins} type="time" icon={Timer} colorClass="text-purple-500" />
+                    </div>
+                    <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm p-5 flex flex-col cursor-pointer hover:border-purple-200" onClick={() => setView('formazione')}>
+                      <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2"><Tag size={14} className="text-purple-500"/> Classifica Formatori</h3>
+                      <div className="flex-1 space-y-3">
+                        {insightsFormazione.topOps.length === 0 ? <p className="text-xs text-slate-400">Nessun dato</p> : 
+                          insightsFormazione.topOps.slice(0,3).map((op, i) => (
+                          <div key={i} className="flex justify-between items-center pb-2 border-b border-slate-50 last:border-0">
+                            <span className="text-sm font-bold text-slate-800">{op.name}</span>
+                            <span className="bg-purple-50 text-purple-700 font-black text-xs px-2 py-1 rounded-md">{formatTime(op.mins)} ({op.count} appt)</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-3 text-center text-[10px] font-bold text-purple-500 uppercase tracking-wider">Vedi Analisi &rarr;</div>
                     </div>
                   </div>
                 </section>
@@ -508,8 +579,8 @@ Generato automaticamente da Pienissimo.bi`;
                     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 flex flex-col cursor-pointer hover:border-emerald-200 transition-all" onClick={() => setView('assistenza')}>
                       <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2"><Tag size={14} className="text-emerald-500"/> Top Categorie</h3>
                       <div className="flex-1 space-y-3">
-                        {insights.topAstCats.length === 0 ? <p className="text-xs text-slate-400">Nessun ticket</p> : 
-                          insights.topAstCats.map((cat, i) => (
+                        {insights.allAstCats.length === 0 ? <p className="text-xs text-slate-400">Nessun ticket</p> : 
+                          insights.allAstCats.slice(0,4).map((cat, i) => (
                             <div key={i} className="flex justify-between items-center pb-2 border-b border-slate-50 last:border-0">
                               <span className="text-xs font-bold text-slate-700 truncate pr-2">{cat.name}</span>
                               <span className="bg-emerald-50 text-emerald-700 font-black text-xs px-2 py-1 rounded-md">{cat.count}</span>
@@ -532,8 +603,8 @@ Generato automaticamente da Pienissimo.bi`;
                     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 flex flex-col cursor-pointer hover:border-amber-200 transition-all" onClick={() => setView('sviluppo')}>
                       <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2"><Bug size={14} className="text-rose-500"/> Emergenze Backlog</h3>
                       <div className="flex-1 space-y-3">
-                        {insights.topDevCats.length === 0 ? <p className="text-xs text-emerald-500 font-bold">Nessun bug aperto! 🎉</p> : 
-                          insights.topDevCats.map((cat, i) => (
+                        {insights.allDevCats.length === 0 ? <p className="text-xs text-emerald-500 font-bold">Nessun bug aperto! 🎉</p> : 
+                          insights.allDevCats.slice(0,4).map((cat, i) => (
                             <div key={i} className="flex justify-between items-center pb-2 border-b border-slate-50 last:border-0">
                               <span className="text-xs font-bold text-slate-700 truncate pr-2">{cat.name}</span>
                               <span className="bg-rose-50 text-rose-700 font-black text-xs px-2 py-1 rounded-md">{cat.count}</span>
@@ -552,7 +623,6 @@ Generato automaticamente da Pienissimo.bi`;
               <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
                 <SectionTitle icon={Users} title="Analisi Dettagliata Reparto Chat" colorClass="text-blue-600" bgClass="bg-blue-100" />
                 
-                {/* WIDGET IMPORTAZIONE MANUALE CON PARSER INTEGRATO */}
                 <div className="bg-slate-900 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between shadow-lg mb-6 border border-slate-800">
                   <div className="flex items-center gap-4">
                     <div className="bg-blue-500/20 p-3 rounded-xl">
@@ -560,7 +630,7 @@ Generato automaticamente da Pienissimo.bi`;
                     </div>
                     <div>
                       <h3 className="text-white font-bold text-sm md:text-base">Carica Storico Chat</h3>
-                      <p className="text-slate-400 text-xs mt-1">Carica il file CSV "Cronologia" esportato da Zoho. I dati verranno inviati al database in tempo reale.</p>
+                      <p className="text-slate-400 text-xs mt-1">Carica il file CSV "Cronologia" esportato da Zoho.</p>
                     </div>
                   </div>
                   <label className={`mt-4 md:mt-0 flex items-center gap-2 px-6 py-3 ${loading ? 'bg-slate-700 text-slate-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-500 text-white cursor-pointer shadow-md shadow-blue-900/50'} rounded-xl text-sm font-bold transition-all`}>
@@ -593,6 +663,62 @@ Generato automaticamente da Pienissimo.bi`;
                             </div>
                             <div className="text-right">
                               <p className="text-sm font-black text-blue-600">{op.count} <span className="text-[10px] font-medium text-slate-400">chat</span></p>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* DETTAGLIO: FORMAZIONE */}
+            {view === 'formazione' && (
+              <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
+                <SectionTitle icon={GraduationCap} title="Analisi Dettagliata Formazione" colorClass="text-purple-600" bgClass="bg-purple-100" />
+                
+                <div className="bg-slate-900 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between shadow-lg mb-6 border border-slate-800">
+                  <div className="flex items-center gap-4">
+                    <div className="bg-purple-500/20 p-3 rounded-xl">
+                      {loading ? <RefreshCw size={24} className="text-purple-400 animate-spin"/> : <UploadCloud size={24} className="text-purple-400"/>}
+                    </div>
+                    <div>
+                      <h3 className="text-white font-bold text-sm md:text-base">Carica Report Formazioni</h3>
+                      <p className="text-slate-400 text-xs mt-1">Carica il CSV "Report Assistenza Tecnica_per operatore". Verrà analizzato e classificato.</p>
+                    </div>
+                  </div>
+                  <label className={`mt-4 md:mt-0 flex items-center gap-2 px-6 py-3 ${loading ? 'bg-slate-700 text-slate-400 cursor-not-allowed' : 'bg-purple-600 hover:bg-purple-500 text-white cursor-pointer shadow-md shadow-purple-900/50'} rounded-xl text-sm font-bold transition-all`}>
+                    <FileText size={16} /> {loading ? 'Elaborazione in corso...' : 'Seleziona CSV'}
+                    <input type="file" accept=".csv" className="hidden" onChange={handleFormazioneImport} disabled={loading} />
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  <div className="lg:col-span-2">
+                    <ChartContainer title={`Classificazione Argomenti Trattati (${timeframe === 'month' ? 'Mese' : 'Settimana'})`} isEmpty={insightsFormazione.topTopics.length === 0}>
+                      <PieChart>
+                        <Pie data={insightsFormazione.topTopics} cx="50%" cy="50%" innerRadius={80} outerRadius={110} paddingAngle={5} dataKey="count" nameKey="name" label={({name, percent}) => `${name} ${(percent * 100).toFixed(0)}%`}>
+                          {insightsFormazione.topTopics.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip contentStyle={{borderRadius:'12px', border:'none', boxShadow:'0 10px 15px -3px rgba(0,0,0,0.1)'}} />
+                      </PieChart>
+                    </ChartContainer>
+                  </div>
+
+                  <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col h-[320px]">
+                    <h3 className="font-bold text-slate-800 mb-4 flex-shrink-0 text-sm uppercase tracking-wide flex items-center gap-2"><Trophy size={16} className="text-purple-500"/> Ore per Operatore</h3>
+                    <div className="flex-1 overflow-auto pr-2 space-y-2">
+                      {insightsFormazione.topOps.length === 0 ? <p className="text-xs text-slate-400 text-center mt-10">Nessuna formazione registrata</p> :
+                        insightsFormazione.topOps.map((op, i) => (
+                          <div key={i} className="flex justify-between items-center p-3 bg-slate-50 rounded-xl border border-slate-100">
+                            <div>
+                              <p className="text-sm font-bold text-slate-800">{op.name}</p>
+                              <p className="text-[10px] font-medium text-slate-500 mt-0.5">{op.count} appuntamenti</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-sm font-black text-purple-600">{formatTime(op.mins)}</p>
                             </div>
                           </div>
                         ))}
@@ -642,19 +768,7 @@ Generato automaticamente da Pienissimo.bi`;
                 </div>
               </div>
             )}
-
-            {/* DETTAGLIO: FORMAZIONE */}
-            {view === 'formazione' && (
-              <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
-                <SectionTitle icon={GraduationCap} title="Reparto Formazione" colorClass="text-purple-600" bgClass="bg-purple-100" />
-                <div className="flex flex-col items-center justify-center h-96 bg-white rounded-3xl border border-slate-200 shadow-sm border-dashed">
-                  <GraduationCap size={48} className="text-slate-200 mb-4" />
-                  <h2 className="text-xl font-bold text-slate-800">Bentornata Sezione Formazione!</h2>
-                  <p className="text-slate-500 mt-2 text-sm text-center max-w-md">La voce è stata ripristinata nel menu. Vuoi che ricolleghiamo i dati che c'erano prima o che creiamo dei nuovi widget e grafici da zero?</p>
-                </div>
-              </div>
-            )}
-
+            
           </div>
         </main>
       </div>
