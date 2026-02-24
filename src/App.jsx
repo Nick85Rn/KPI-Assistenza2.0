@@ -97,7 +97,7 @@ const ChartContainer = ({ title, children, isEmpty, height = 320 }) => (
 // --- MAIN APP ---
 export default function App() {
   const [view, setView] = useState('dashboard');
-  const [timeframe, setTimeframe] = useState('week'); // 'week' | 'month'
+  const [timeframe, setTimeframe] = useState('week'); 
   const [data, setData] = useState({ chat: [], ast: [], dev: [], form: [] });
   const [loading, setLoading] = useState(false);
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -107,7 +107,6 @@ export default function App() {
 
   useEffect(() => { fetchAll(); }, []);
 
-  // Motore di estrazione "Senza Limiti" da Supabase
   const fetchAll = async () => {
     setLoading(true);
     try {
@@ -147,7 +146,6 @@ export default function App() {
     }
   };
 
-  // --- PARSER CSV AVANZATO (Universale) ---
   const parseCSVAdvanced = (csvText) => {
     const rows = []; let currentRow = []; let currentCell = ''; let inQuotes = false;
     for (let i = 0; i < csvText.length; i++) {
@@ -171,7 +169,6 @@ export default function App() {
     return rows;
   };
 
-  // --- IMPORT CHAT ---
   const handleChatImport = async (e) => {
     const file = e.target.files[0]; if (!file) return;
     const reader = new FileReader();
@@ -210,7 +207,6 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  // --- IMPORT FORMAZIONE CON INTELLIGENZA ARTIFICIALE ---
   const handleFormazioneImport = async (e) => {
     const file = e.target.files[0]; if (!file) return;
     const reader = new FileReader();
@@ -229,7 +225,6 @@ export default function App() {
         const headers = parsedRows[headerIdx];
         const records = [];
 
-        // Traduttore Date in Italiano a ISO
         const parseItalianDate = (dateStr) => {
           if (!dateStr) return null;
           const months = { 'gen': 0, 'feb': 1, 'mar': 2, 'apr': 3, 'mag': 4, 'giu': 5, 'lug': 6, 'ago': 7, 'set': 8, 'ott': 9, 'nov': 10, 'dic': 11 };
@@ -242,7 +237,6 @@ export default function App() {
           return null;
         };
 
-        // Algoritmo di Classificazione Argomento
         const classifyTopic = (title, desc) => {
           const t = (title + " " + desc).toLowerCase();
           if (t.includes('voice pro') || t.includes('centralino')) return 'Centralino / Voice Pro';
@@ -280,7 +274,6 @@ export default function App() {
 
         if (records.length === 0) throw new Error("Nessuna riga valida trovata.");
 
-        // Inserimento brutale (attenzione ai doppioni se si ricarica lo stesso file)
         for (let i = 0; i < records.length; i += 500) {
             const chunk = records.slice(i, i + 500);
             await supabase.from('zoho_raw_formazione').insert(chunk);
@@ -309,7 +302,6 @@ export default function App() {
     }
   }, [currentDate, timeframe]);
 
-  // --- KPI ENGINE ---
   const kpi = useMemo(() => {
     const calc = (start, end) => {
       const chats = data.chat.filter(x => safeInRange(x.created_time, start, end));
@@ -334,30 +326,18 @@ export default function App() {
 
   const insightsFormazione = useMemo(() => {
     const forms = data.form.filter(x => safeInRange(x.created_time, periods.curr.start, periods.curr.end));
-    
-    const opsMap = {};
-    const topicMap = {};
-    
+    const opsMap = {}; const topicMap = {};
     forms.forEach(f => {
-      const op = f.operator || 'Sconosciuto';
-      const t = f.topic || 'Generale';
-      const dur = Number(f.duration_minutes) || 0;
-
+      const op = f.operator || 'Sconosciuto'; const t = f.topic || 'Generale'; const dur = Number(f.duration_minutes) || 0;
       if (!opsMap[op]) opsMap[op] = { name: op, count: 0, mins: 0 };
       opsMap[op].count++; opsMap[op].mins += dur;
-
       if (!topicMap[t]) topicMap[t] = { name: t, count: 0, mins: 0 };
       topicMap[t].count++; topicMap[t].mins += dur;
     });
-
-    return {
-      topOps: Object.values(opsMap).sort((a,b) => b.mins - a.mins),
-      topTopics: Object.values(topicMap).sort((a,b) => b.count - a.count)
-    };
+    return { topOps: Object.values(opsMap).sort((a,b) => b.mins - a.mins), topTopics: Object.values(topicMap).sort((a,b) => b.count - a.count) };
   }, [data.form, periods.curr]);
 
   const insights = useMemo(() => {
-    // Top Chat
     const chats = data.chat.filter(x => safeInRange(x.created_time, periods.curr.start, periods.curr.end));
     const opsMap = {};
     chats.forEach(c => {
@@ -366,12 +346,8 @@ export default function App() {
        opsMap[op].count++; opsMap[op].waitSum += (Number(c.waiting_time_seconds)||0);
     });
     const allOps = Object.values(opsMap).map(o => ({ name: o.name, count: o.count, avgWait: o.count > 0 ? o.waitSum / o.count : 0 })).sort((a,b) => b.count - a.count);
-
-    // Top Ast
     const ast = data.ast.filter(x => safeInRange(x.created_time, periods.curr.start, periods.curr.end));
     const astCatMap = {}; ast.forEach(t => { const c = t.category || 'Generale'; astCatMap[c] = (astCatMap[c]||0) + 1; });
-    
-    // Top Dev
     const devCatsMap = {}; data.dev.filter(x => !x.status?.toLowerCase().includes('chius')).forEach(t => { const c = t.category || 'Generale'; devCatsMap[c] = (devCatsMap[c]||0) + 1; });
 
     return { 
@@ -408,7 +384,7 @@ export default function App() {
         const sign = diff > 0 ? '+' : '-';
         const icon = isGood ? '🟢' : '🔴';
         const absVal = formatter ? formatter(Math.abs(diff)) : Math.abs(diff);
-        return `${icon} ${sign}${absVal}`;
+        return `${icon} ${sign} ${absVal}`;
     };
 
     const reportText = `📊 REPORT DIREZIONALE PIENISSIMO
@@ -422,16 +398,16 @@ Il team Sviluppo ha corretto ${c.devOut} bug (Backlog attivo: ${c.backlog}).
 ⚡ INDICATORI CHIAVE E TREND (VS ${periodLabelPrec.toUpperCase()}):
 
 💬 REPARTO CHAT
-• Volumi Gestiti: ${c.chatVol} (${formatTrend(c.chatVol, p.chatVol, null)})
-• Tempo Attesa: ${formatSeconds(c.chatWait)} (${formatTrend(c.chatWait, p.chatWait, formatSeconds, true)})
+• Volumi Gestiti: ${c.chatVol}  (${formatTrend(c.chatVol, p.chatVol, null)})
+• Tempo Attesa: ${formatSeconds(c.chatWait)}  (${formatTrend(c.chatWait, p.chatWait, formatSeconds, true)})
 
 🎓 FORMAZIONE
-• Sessioni: ${c.formCount} (${formatTrend(c.formCount, p.formCount, null)})
-• Ore Totali: ${formatTime(c.formMins)} (${formatTrend(c.formMins, p.formMins, formatTime)})
+• Sessioni: ${c.formCount}  (${formatTrend(c.formCount, p.formCount, null)})
+• Ore Totali: ${formatTime(c.formMins)}  (${formatTrend(c.formMins, p.formMins, formatTime)})
 
 🛠️ SUPPORTO TECNICO
-• Ticket Chiusi: ${c.astOut} (${formatTrend(c.astOut, p.astOut, null)})
-• SLA Risoluzione: ${formatTime(c.slaAst)} (${formatTrend(c.slaAst, p.slaAst, formatTime, true)})
+• Ticket Chiusi: ${c.astOut}  (${formatTrend(c.astOut, p.astOut, null)})
+• SLA Risoluzione: ${formatTime(c.slaAst)}  (${formatTrend(c.slaAst, p.slaAst, formatTime, true)})
 -----------------------------------------
 Generato automaticamente da Pienissimo.bi`;
 
@@ -474,20 +450,15 @@ Generato automaticamente da Pienissimo.bi`;
         {/* TOPBAR */}
         <header className="bg-white/80 backdrop-blur-md border-b border-slate-200 px-8 py-4 flex justify-between items-center z-10 sticky top-0">
           <div className="flex items-center gap-4">
-            
-            {/* TOGGLE MESE/SETTIMANA */}
             <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 shadow-inner">
               <button onClick={() => setTimeframe('week')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${timeframe === 'week' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>Settimana</button>
               <button onClick={() => setTimeframe('month')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${timeframe === 'month' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>Mese</button>
             </div>
-
-            {/* NAVIGATORE DATE */}
             <div className="flex items-center gap-1 bg-slate-100 p-1.5 rounded-xl border border-slate-200 shadow-inner">
               <button onClick={handlePrevPeriod} className="p-1.5 hover:bg-white rounded-lg transition-all"><ChevronLeft size={16}/></button>
               <span className="text-xs font-black px-4 uppercase tracking-widest text-slate-700">{periods.curr.label}</span>
               <button onClick={handleNextPeriod} className="p-1.5 hover:bg-white rounded-lg transition-all"><ChevronRight size={16}/></button>
             </div>
-
           </div>
           <div className="flex items-start gap-4">
             <button onClick={handleGenerateReport} className="flex items-center gap-2 px-4 h-[36px] bg-white border border-slate-200 hover:border-slate-300 text-slate-700 rounded-xl text-xs font-bold transition-all shadow-sm"><FileText size={14} /> Report Executive</button>
@@ -503,17 +474,28 @@ Generato automaticamente da Pienissimo.bi`;
         <main className="flex-1 overflow-auto p-8 pb-32">
           <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
             
-            {/* FINESTRA REPORT GENERATO */}
+            {/* NUOVO DESIGN REPORT EXECUTIVE (CHIARO E MODERNO) */}
             {generatedReport && (
-              <div className="bg-slate-900 rounded-2xl p-6 relative shadow-2xl text-white mb-8 border border-slate-700">
-                <button onClick={() => setGeneratedReport(null)} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X size={18}/></button>
-                <div className="flex justify-between items-center mb-4">
-                  <div className="flex items-center gap-2"><ClipboardCheck size={20} className="text-blue-400"/><h3 className="font-bold uppercase text-xs tracking-widest text-blue-400">Report per la Direzione</h3></div>
-                  <button onClick={copyToClipboard} className="flex items-center gap-2 text-xs font-bold bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg transition-all mr-6">
-                    {copied ? <CheckCircle2 size={14} className="text-emerald-400"/> : <Copy size={14}/>} {copied ? 'Copiato!' : 'Copia Testo'}
+              <div className="bg-white rounded-3xl p-8 relative shadow-2xl shadow-slate-200/50 mb-8 border border-slate-200/80 ring-1 ring-slate-900/5 animate-in fade-in slide-in-from-top-4">
+                <button onClick={() => setGeneratedReport(null)} className="absolute top-6 right-6 text-slate-400 hover:text-slate-700 transition-colors bg-slate-50 hover:bg-slate-100 p-2 rounded-full">
+                  <X size={18}/>
+                </button>
+                
+                <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-blue-50 border border-blue-100 p-2.5 rounded-xl">
+                      <ClipboardCheck size={22} className="text-blue-600"/>
+                    </div>
+                    <h3 className="font-bold uppercase text-sm tracking-widest text-slate-800">Report per la Direzione</h3>
+                  </div>
+                  <button onClick={copyToClipboard} className="flex items-center gap-2 text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl transition-all shadow-lg shadow-blue-600/20 mr-12">
+                    {copied ? <CheckCircle2 size={16} className="text-white"/> : <Copy size={16}/>} {copied ? 'Copiato negli appunti!' : 'Copia Testo Report'}
                   </button>
                 </div>
-                <pre className="text-sm font-mono text-slate-200 whitespace-pre-wrap leading-relaxed bg-slate-800/50 p-4 rounded-xl">{generatedReport}</pre>
+                
+                <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100/80 text-slate-700 font-medium text-[15px] leading-relaxed whitespace-pre-wrap font-sans">
+                  {generatedReport}
+                </div>
               </div>
             )}
 
@@ -544,7 +526,6 @@ Generato automaticamente da Pienissimo.bi`;
                   </div>
                 </section>
 
-                {/* Formazione (Aggiunta) */}
                 <section>
                   <SectionTitle icon={GraduationCap} title="Formazione Clienti" colorClass="text-purple-600" bgClass="bg-purple-100" />
                   <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
